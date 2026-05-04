@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
-from models.database import get_db
+from models.database import get_db, DATABASE_URL
+PH = '%s' if DATABASE_URL else '?'
 
 sms_bp = Blueprint('sms', __name__)
 
@@ -78,7 +79,7 @@ def build_three_month_alert(order, deadline_str):
 
 def get_twilio_config():
     conn = get_db()
-    rows = conn.execute("SELECT key,value FROM settings WHERE key IN ('twilio_sid','twilio_token','twilio_from')").fetchall()
+    rows = conn.cursor().execute("SELECT key,value FROM settings WHERE key IN ('twilio_sid','twilio_token','twilio_from')") if DATABASE_URL else None
     conn.close()
     return {r['key']: r['value'] for r in rows}
 
