@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Univers Pressing — Connexion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --primary:#6C3EF4;
+  --primary-dark:#5429D6;
+  --primary-light:#EDE9FE;
+  --accent:#F59E0B;
+  --navy:#0F172A;
+  --white:#FFFFFF;
+  --bg:#F8F7FF;
+  --card:#FFFFFF;
+  --text:#1E293B;
+  --muted:#64748B;
+  --border:#E2E8F0;
+  --success:#10B981;
+  --error:#EF4444;
+  --radius:14px;
+  --shadow:0 20px 60px rgba(108,62,244,0.15);
+}
+body{
+  font-family:'Plus Jakarta Sans',sans-serif;
+  background:var(--bg);
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  position:relative;
+  overflow:hidden;
+}
+/* Background blobs */
+body::before{
+  content:'';
+  position:fixed;
+  top:-20%;left:-10%;
+  width:600px;height:600px;
+  background:radial-gradient(circle,rgba(108,62,244,0.12) 0%,transparent 70%);
+  border-radius:50%;
+  pointer-events:none;
+}
+body::after{
+  content:'';
+  position:fixed;
+  bottom:-20%;right:-10%;
+  width:500px;height:500px;
+  background:radial-gradient(circle,rgba(245,158,11,0.10) 0%,transparent 70%);
+  border-radius:50%;
+  pointer-events:none;
+}
+.login-wrapper{
+  width:100%;
+  max-width:460px;
+  padding:24px;
+  position:relative;
+  z-index:10;
+}
+/* Brand */
+.brand{
+  text-align:center;
+  margin-bottom:32px;
+}
+.brand-logo-wrap{
+  width:90px;height:90px;
+  background:var(--white);
+  border-radius:24px;
+  display:flex;align-items:center;justify-content:center;
+  margin:0 auto 16px;
+  box-shadow:0 8px 32px rgba(108,62,244,0.18);
+  border:2px solid var(--primary-light);
+  overflow:hidden;
+}
+.brand-logo-wrap img{width:70px;height:70px;object-fit:contain;}
+.brand-name{font-size:1.6rem;font-weight:800;color:var(--navy);letter-spacing:-0.02em;}
+.brand-name span{color:var(--primary);}
+.brand-ar{font-family:'Cairo',sans-serif;font-size:0.95rem;color:var(--muted);margin-top:2px;}
+/* Card */
+.card{
+  background:var(--white);
+  border-radius:24px;
+  padding:36px;
+  box-shadow:var(--shadow);
+  border:1px solid rgba(108,62,244,0.08);
+}
+/* Tabs */
+.tabs{
+  display:flex;
+  background:var(--primary-light);
+  border-radius:12px;
+  padding:4px;
+  margin-bottom:28px;
+  gap:4px;
+}
+.tab-btn{
+  flex:1;
+  padding:10px;
+  border:none;
+  background:transparent;
+  border-radius:10px;
+  font-size:0.95rem;
+  font-weight:600;
+  font-family:'Plus Jakarta Sans',sans-serif;
+  color:var(--primary);
+  cursor:pointer;
+  transition:all .22s;
+}
+.tab-btn.active{background:var(--primary);color:var(--white);box-shadow:0 4px 12px rgba(108,62,244,0.3);}
+/* Form */
+.form-section{display:none;}
+.form-section.active{display:block;}
+.form-group{margin-bottom:18px;}
+.form-group label{
+  display:block;
+  font-size:0.85rem;
+  font-weight:600;
+  color:var(--muted);
+  margin-bottom:7px;
+  text-transform:uppercase;
+  letter-spacing:0.05em;
+}
+.input-wrap{position:relative;}
+.input-wrap input{
+  width:100%;
+  padding:14px 16px;
+  border:2px solid var(--border);
+  border-radius:var(--radius);
+  font-size:1rem;
+  font-family:'Plus Jakarta Sans',sans-serif;
+  color:var(--text);
+  background:var(--bg);
+  outline:none;
+  transition:all .22s;
+}
+.input-wrap input:focus{border-color:var(--primary);background:var(--white);box-shadow:0 0 0 4px rgba(108,62,244,0.08);}
+.btn-submit{
+  width:100%;
+  padding:15px;
+  background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);
+  color:var(--white);
+  border:none;
+  border-radius:var(--radius);
+  font-size:1.05rem;
+  font-weight:700;
+  font-family:'Plus Jakarta Sans',sans-serif;
+  cursor:pointer;
+  transition:all .22s;
+  margin-top:8px;
+  box-shadow:0 4px 20px rgba(108,62,244,0.35);
+}
+.btn-submit:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(108,62,244,0.4);}
+.btn-submit:active{transform:translateY(0);}
+.btn-submit:disabled{opacity:0.7;cursor:not-allowed;transform:none;}
+/* Alert */
+.alert{
+  padding:12px 16px;
+  border-radius:10px;
+  font-size:0.9rem;
+  font-weight:500;
+  margin-bottom:16px;
+  display:none;
+}
+.alert.error{background:#FEF2F2;color:var(--error);border:1px solid #FECACA;}
+.alert.success{background:#ECFDF5;color:var(--success);border:1px solid #A7F3D0;}
+.alert.show{display:block;}
+
+</style>
+</head>
+<body>
+<div class="login-wrapper">
+  <div class="brand">
+    <div class="brand-logo-wrap">
+      <img src="/static/images/logo.png" alt="Univers Pressing Logo"/>
+    </div>
+    <div class="brand-name">Univers <span>Pressing</span></div>
+    <div class="brand-ar">عالم التصبين</div>
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('login')">Connexion</button>
+      <button class="tab-btn" onclick="switchTab('register')">Inscription</button>
+    </div>
+
+    <div class="alert" id="alertBox"></div>
+
+    <!-- LOGIN -->
+    <div class="form-section active" id="loginForm">
+      <div class="form-group">
+        <label>Nom d'utilisateur</label>
+        <div class="input-wrap">
+          <input type="text" id="login_username" placeholder="Entrez votre identifiant" autocomplete="username"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Mot de passe</label>
+        <div class="input-wrap">
+          <input type="password" id="login_password" placeholder="••••••••" autocomplete="current-password"/>
+        </div>
+      </div>
+      <button class="btn-submit" id="loginBtn" onclick="doLogin()">Se connecter</button>
+    </div>
+
+    <!-- REGISTER -->
+    <div class="form-section" id="registerForm">
+      <div class="form-group">
+        <label>Nom complet</label>
+        <div class="input-wrap">
+          <input type="text" id="reg_fullname" placeholder="Ex: Rabia Abderrahmane"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Nom d'utilisateur</label>
+        <div class="input-wrap">
+          <input type="text" id="reg_username" placeholder="Choisissez un identifiant"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Mot de passe (6 caractères min)</label>
+        <div class="input-wrap">
+          <input type="password" id="reg_password" placeholder="••••••••"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Rôle / الدور</label>
+        <div style="display:flex;gap:10px;margin-top:4px">
+          <label style="flex:1;display:flex;align-items:center;gap:8px;padding:12px 14px;border:2px solid var(--border);border-radius:10px;cursor:pointer;font-weight:600;font-size:.9rem;color:var(--text);background:var(--bg);text-transform:none;letter-spacing:normal">
+            <input type="radio" name="reg_role" id="role_gerant" value="gerant" style="accent-color:var(--primary);width:18px;height:18px"/>
+            🧑‍💼 Gérant / مسؤول
+          </label>
+          <label style="flex:1;display:flex;align-items:center;gap:8px;padding:12px 14px;border:2px solid var(--border);border-radius:10px;cursor:pointer;font-weight:600;font-size:.9rem;color:var(--text);background:var(--bg);text-transform:none;letter-spacing:normal">
+            <input type="radio" name="reg_role" id="role_employe" value="employe" checked style="accent-color:var(--primary);width:18px;height:18px"/>
+            👷 Employé / موظف
+          </label>
+        </div>
+        <p style="font-size:.8rem;color:var(--muted);margin-top:6px">Le gérant accède au tableau de bord et aux statistiques financières.</p>
+      </div>
+      <button class="btn-submit" id="registerBtn" onclick="doRegister()">Créer mon compte</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', (tab==='login'&&i===0)||(tab==='register'&&i===1)));
+  document.getElementById('loginForm').classList.toggle('active', tab==='login');
+  document.getElementById('registerForm').classList.toggle('active', tab==='register');
+  hideAlert();
+}
+
+function showAlert(msg, type='error') {
+  const a = document.getElementById('alertBox');
+  a.textContent = msg;
+  a.className = `alert ${type} show`;
+}
+function hideAlert() {
+  document.getElementById('alertBox').className = 'alert';
+}
+
+async function doLogin() {
+  const btn = document.getElementById('loginBtn');
+  const username = document.getElementById('login_username').value.trim();
+  const password = document.getElementById('login_password').value;
+  if (!username || !password) { showAlert('Remplissez tous les champs'); return; }
+  btn.disabled = true; btn.textContent = 'Connexion...';
+  try {
+    const r = await fetch('/api/auth/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username, password})
+    });
+    const d = await r.json();
+    if (d.success) {
+      const dest = d.role === 'employe' ? '/#orders' : '/';
+      showAlert(`Bienvenue ${d.full_name} !`, 'success');
+      setTimeout(() => window.location.href = '/', 800);
+    } else {
+      showAlert(d.error || 'Identifiants incorrects');
+      btn.disabled = false; btn.textContent = 'Se connecter';
+    }
+  } catch(e) {
+    showAlert('Erreur réseau');
+    btn.disabled = false; btn.textContent = 'Se connecter';
+  }
+}
+
+async function doRegister() {
+  const btn = document.getElementById('registerBtn');
+  const full_name = document.getElementById('reg_fullname').value.trim();
+  const username  = document.getElementById('reg_username').value.trim();
+  const password  = document.getElementById('reg_password').value;
+  const roleEl    = document.querySelector('input[name="reg_role"]:checked');
+  const role      = roleEl ? roleEl.value : 'employe';
+  if (!full_name || !username || !password) { showAlert('Remplissez tous les champs'); return; }
+  btn.disabled = true; btn.textContent = 'Création...';
+  try {
+    const r = await fetch('/api/auth/register', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({full_name, username, password, role})
+    });
+    const d = await r.json();
+    if (d.success) {
+      showAlert('Compte créé ! Connectez-vous maintenant.', 'success');
+      setTimeout(() => switchTab('login'), 1200);
+    } else {
+      showAlert(d.error || 'Erreur lors de la création');
+    }
+  } catch(e) {
+    showAlert('Erreur réseau');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Créer mon compte';
+  }
+}
+
+// Enter key
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    if (document.getElementById('loginForm').classList.contains('active')) doLogin();
+    else doRegister();
+  }
+});
+</script>
+</body>
+</html>

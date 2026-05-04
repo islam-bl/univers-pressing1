@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="fr" dir="ltr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Univers Pressing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Cairo:wght@400;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/css/main.css"/>
+</head>
+<body>
+
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-logo">
+      <img src="/static/images/logo.png" alt="Logo"/>
+    </div>
+    <div class="brand-texts">
+      <span class="brand-name-fr">Univers Pressing</span>
+      <span class="brand-name-ar">عالم التصبين</span>
+    </div>
+  </div>
+  <nav class="sidebar-nav">
+    <!-- Tableau de bord : gérant uniquement -->
+    <button class="nav-btn active gerant-only" onclick="showPage('dashboard')" id="nav-dashboard">
+      <span class="nav-icon">🏠</span>
+      <span data-fr="Tableau de bord" data-ar="لوحة التحكم">Tableau de bord</span>
+    </button>
+    <!-- Opérations quotidiennes : tous -->
+    <button class="nav-btn" onclick="showPage('deposit')" id="nav-deposit">
+      <span class="nav-icon">📥</span>
+      <span data-fr="Nouveau Dépôt" data-ar="إيداع جديد">Nouveau Dépôt</span>
+    </button>
+    <button class="nav-btn" onclick="showPage('pickup')" id="nav-pickup">
+      <span class="nav-icon">📤</span>
+      <span data-fr="Retrait" data-ar="استلام">Retrait</span>
+    </button>
+    <button class="nav-btn" onclick="showPage('orders')" id="nav-orders">
+      <span class="nav-icon">📋</span>
+      <span data-fr="Commandes" data-ar="الطلبات">Commandes</span>
+    </button>
+    <!-- Historique : gérant uniquement -->
+    <button class="nav-btn gerant-only" onclick="showPage('history')" id="nav-history">
+      <span class="nav-icon">🗂️</span>
+      <span data-fr="Historique" data-ar="السجل">Historique</span>
+    </button>
+    <!-- Réglages : gérant uniquement -->
+    <button class="nav-btn gerant-only" onclick="showPage('settings')" id="nav-settings">
+      <span class="nav-icon">⚙️</span>
+      <span data-fr="Réglages" data-ar="الإعدادات">Réglages</span>
+    </button>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="user-badge">
+      <div class="user-avatar" id="userAvatar">?</div>
+      <div class="user-info">
+        <div class="user-name" id="userName">...</div>
+        <div class="user-role" id="userRole">—</div>
+      </div>
+    </div>
+    <button class="btn-logout" onclick="doLogout()" data-fr="Se déconnecter" data-ar="تسجيل الخروج">Se déconnecter</button>
+    <button class="lang-toggle" id="langToggle" onclick="toggleLang()">🌐 العربية</button>
+  </div>
+</aside>
+
+<header class="mobile-header">
+  <button class="hamburger" onclick="toggleSidebar()">☰</button>
+  <div class="mobile-brand">
+    <img src="/static/images/logo.png" alt="Logo"/>
+    <span>Univers Pressing</span>
+  </div>
+  <button style="background:none;border:none;font-size:1.2rem;cursor:pointer" onclick="toggleLang()">🌐</button>
+</header>
+
+<main class="main-content">
+
+  <!-- ══ DASHBOARD (gérant uniquement) ══ -->
+  <section class="page active" id="page-dashboard">
+    <div class="page-header">
+      <h1 data-fr="Tableau de bord" data-ar="لوحة التحكم">Tableau de bord</h1>
+      <p class="page-subtitle" data-fr="Bienvenue chez Univers Pressing" data-ar="مرحباً بكم في عالم التصبين">Bienvenue chez Univers Pressing</p>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card s-blue">
+        <div class="stat-icon-wrap">📥</div>
+        <div><div class="stat-value" id="stat-received">—</div><div class="stat-label" data-fr="En attente" data-ar="قيد الانتظار">En attente</div></div>
+      </div>
+      <div class="stat-card s-green">
+        <div class="stat-icon-wrap">✅</div>
+        <div><div class="stat-value" id="stat-ready">—</div><div class="stat-label" data-fr="Prêts" data-ar="جاهز">Prêts</div></div>
+      </div>
+      <div class="stat-card s-amber">
+        <div class="stat-icon-wrap">🗂️</div>
+        <div><div class="stat-value" id="stat-completed">—</div><div class="stat-label" data-fr="Terminés" data-ar="مكتمل">Terminés</div></div>
+      </div>
+      <div class="stat-card s-purple">
+        <div class="stat-icon-wrap">💰</div>
+        <div><div class="stat-value" id="stat-revenue">—</div><div class="stat-label" data-fr="CA mois (MAD)" data-ar="إيرادات الشهر">CA mois (MAD)</div></div>
+      </div>
+    </div>
+    <div class="dashboard-actions">
+      <button class="action-card ac-purple" onclick="showPage('deposit')">
+        <span class="action-icon">📥</span>
+        <div class="action-label" data-fr="Nouveau Dépôt" data-ar="إيداع جديد">Nouveau Dépôt</div>
+        <div class="action-sub" data-fr="Enregistrer un article" data-ar="تسجيل قطعة">Enregistrer un article</div>
+      </button>
+      <button class="action-card ac-green" onclick="showPage('pickup')">
+        <span class="action-icon">📤</span>
+        <div class="action-label" data-fr="Retrait" data-ar="استلام">Retrait</div>
+        <div class="action-sub" data-fr="Remettre un article" data-ar="تسليم قطعة">Remettre un article</div>
+      </button>
+      <button class="action-card ac-blue" onclick="showPage('orders')">
+        <span class="action-icon">📋</span>
+        <div class="action-label" data-fr="Commandes" data-ar="الطلبات">Commandes</div>
+        <div class="action-sub" data-fr="Voir et gérer" data-ar="عرض وإدارة">Voir et gérer</div>
+      </button>
+      <button class="action-card ac-amber" onclick="showPage('history')">
+        <span class="action-icon">🗂️</span>
+        <div class="action-label" data-fr="Historique" data-ar="السجل">Historique</div>
+        <div class="action-sub" data-fr="Commandes terminées" data-ar="المكتملة">Commandes terminées</div>
+      </button>
+    </div>
+    <div class="section-card">
+      <div class="section-card-header">
+        <h2 data-fr="Commandes récentes" data-ar="الطلبات الأخيرة">Commandes récentes</h2>
+      </div>
+      <div id="recentList" style="padding:8px 8px"></div>
+    </div>
+  </section>
+
+  <!-- ══ DEPOT ══ -->
+  <section class="page" id="page-deposit">
+    <div class="page-header">
+      <h1 data-fr="Nouveau Dépôt" data-ar="إيداع جديد">Nouveau Dépôt</h1>
+      <p class="page-subtitle" data-fr="Enregistrer un article client" data-ar="تسجيل قطعة ملابس">Enregistrer un article client</p>
+    </div>
+    <div class="form-card">
+      <form id="depositForm" enctype="multipart/form-data">
+        <div class="form-section">
+          <div class="form-section-title"><div class="section-badge">👤</div><span data-fr="Informations client" data-ar="معلومات الزبون">Informations client</span></div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label data-fr="Nom du client *" data-ar="اسم الزبون *">Nom du client *</label>
+              <input type="text" name="customer_name" class="form-input" placeholder="Ex: Mohammed Alami" required/>
+            </div>
+            <div class="form-group">
+              <label data-fr="Téléphone *" data-ar="رقم الهاتف *">Téléphone *</label>
+              <input type="tel" name="customer_phone" class="form-input" placeholder="06 XX XX XX XX" required/>
+            </div>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title"><div class="section-badge">👔</div><span data-fr="Article et service" data-ar="القطعة ونوع الخدمة">Article et service</span></div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label data-fr="Type d'article *" data-ar="نوع القطعة *">Type d'article *</label>
+              <select name="article_type" id="articleSelect" class="form-input" required onchange="updatePrice()">
+                <option value="">-- Choisir l'article --</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label data-fr="Type de service *" data-ar="نوع الخدمة *">Type de service *</label>
+              <select name="service_type" id="serviceSelect" class="form-input" required onchange="updatePrice()">
+                <option value="">-- Choisir le service --</option>
+              </select>
+            </div>
+          </div>
+          <div class="price-display" id="priceDisplay" style="display:none">
+            <span style="font-size:.85rem;color:var(--text-mid);font-weight:600" data-fr="Prix catalogue:" data-ar="السعر:">Prix catalogue:</span>
+            <span class="price-value" id="catalogPrice">—</span>
+          </div>
+          <div class="form-group" style="margin-top:12px">
+            <label class="toggle-label">
+              <span data-fr="Article de haute valeur ?" data-ar="قطعة ذات قيمة عالية؟">Article de haute valeur ?</span>
+              <div class="toggle-switch">
+                <input type="checkbox" name="is_high_value" value="1" id="highValueToggle" onchange="toggleHighValue()"/>
+                <span class="toggle-slider"></span>
+              </div>
+            </label>
+          </div>
+          <div class="form-group" id="manualPriceGroup" style="display:none">
+            <label data-fr="Prix personnalisé (MAD)" data-ar="سعر مخصص">Prix personnalisé (MAD)</label>
+            <input type="number" name="final_price" id="finalPriceInput" class="form-input" step="0.50" min="0"/>
+            <input type="hidden" name="price_overridden" id="priceOverrideHidden" value="0"/>
+            <p class="form-hint" data-fr="Prix manuel — catalogue ignoré" data-ar="سعر يدوي">Prix manuel — catalogue ignoré</p>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title"><div class="section-badge">📅</div><span data-fr="Dates" data-ar="التواريخ">Dates</span></div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label data-fr="Date de dépôt *" data-ar="تاريخ الاستلام *">Date de dépôt *</label>
+              <input type="date" name="deposit_date" id="depositDate" class="form-input" required/>
+            </div>
+            <div class="form-group">
+              <label data-fr="Date prévue de retrait *" data-ar="تاريخ التسليم *">Date prévue de retrait *</label>
+              <input type="date" name="expected_pickup_date" id="pickupDateInput" class="form-input" required/>
+            </div>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title"><div class="section-badge">🤝</div><span data-fr="Personne autorisée" data-ar="الشخص المفوّض">Personne autorisée</span></div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label data-fr="Nom (optionnel)" data-ar="الاسم (اختياري)">Nom (optionnel)</label>
+              <input type="text" name="authorized_person_name" class="form-input" placeholder="Ex: Fatima"/>
+            </div>
+            <div class="form-group">
+              <label data-fr="Relation" data-ar="صلة القرابة">Relation</label>
+              <input type="text" name="authorized_person_relation" class="form-input" placeholder="Ex: Épouse, Fils..."/>
+            </div>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title"><div class="section-badge">📷</div><span data-fr="Photo de l'article" data-ar="صورة القطعة">Photo de l'article</span></div>
+          <div class="photo-upload-area" onclick="document.getElementById('photoInput').click()">
+            <span class="photo-upload-icon" id="photoIcon">📷</span>
+            <p id="photoText" data-fr="Cliquer pour ajouter une photo (optionnel)" data-ar="اضغط لإضافة صورة">Cliquer pour ajouter une photo (optionnel)</p>
+            <img id="photoPreview" src="" style="display:none;max-width:100%;max-height:180px;border-radius:10px;margin-top:10px"/>
+          </div>
+          <input type="file" id="photoInput" name="article_photo" accept="image/*" capture="environment" style="display:none" onchange="previewPhoto(this)"/>
+        </div>
+        <div class="form-section">
+          <div class="form-group">
+            <label data-fr="Notes / Observations" data-ar="ملاحظات">Notes / Observations</label>
+            <textarea name="notes" class="form-input" rows="3" placeholder="Taches, couleur, instructions spéciales..."></textarea>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg btn-full" id="submitBtn">
+          <span data-fr="Enregistrer le Dépôt" data-ar="حفظ الإيداع">Enregistrer le Dépôt</span>
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ══ RETRAIT ══ -->
+  <section class="page" id="page-pickup">
+    <div class="page-header">
+      <h1 data-fr="Retrait d'article" data-ar="استلام قطعة">Retrait d'article</h1>
+      <p class="page-subtitle" data-fr="Entrez le code de retrait" data-ar="أدخل رمز الاستلام">Entrez le code de retrait</p>
+    </div>
+    <div class="form-card" style="max-width:580px">
+      <div style="display:flex;gap:12px">
+        <input type="text" id="pickupCodeField" class="pickup-code-field" placeholder="AB12CD" maxlength="6" oninput="this.value=this.value.toUpperCase()"/>
+        <button class="btn btn-primary btn-lg" onclick="lookupPickup()" data-fr="Rechercher" data-ar="بحث">Rechercher</button>
+      </div>
+    </div>
+    <div id="pickupResult" style="margin-top:20px"></div>
+  </section>
+
+  <!-- ══ COMMANDES ══ -->
+  <section class="page" id="page-orders">
+    <div class="page-header">
+      <div class="page-header-row">
+        <div>
+          <h1 data-fr="Commandes actives" data-ar="الطلبات النشطة">Commandes actives</h1>
+          <p class="page-subtitle" data-fr="Reçues et prêtes" data-ar="المستلمة والجاهزة">Reçues et prêtes</p>
+        </div>
+        <input type="text" class="search-input" placeholder="🔍 Rechercher..." oninput="searchOrders(this.value)"/>
+      </div>
+      <div class="filter-tabs">
+        <button class="filter-tab active" onclick="filterOrders('all',this)" data-fr="Tous" data-ar="الكل">Tous</button>
+        <button class="filter-tab" onclick="filterOrders('received',this)" data-fr="Reçus" data-ar="مستلم">Reçus</button>
+        <button class="filter-tab" onclick="filterOrders('ready',this)" data-fr="Prêts" data-ar="جاهز">Prêts</button>
+      </div>
+    </div>
+    <div id="ordersList" class="orders-grid"></div>
+  </section>
+
+  <!-- ══ HISTORIQUE (gérant uniquement) ══ -->
+  <section class="page" id="page-history">
+    <div class="page-header">
+      <h1 data-fr="Historique" data-ar="السجل">Historique</h1>
+      <p class="page-subtitle" data-fr="Commandes terminées" data-ar="المكتملة">Commandes terminées</p>
+    </div>
+    <div id="historyList" class="orders-grid"></div>
+  </section>
+
+  <!-- ══ REGLAGES (gérant uniquement) ══ -->
+  <section class="page" id="page-settings">
+    <div class="page-header">
+      <h1 data-fr="Réglages" data-ar="الإعدادات">Réglages</h1>
+      <p class="page-subtitle" data-fr="Rappels automatiques aux clients" data-ar="التذكيرات التلقائية">Rappels automatiques aux clients</p>
+    </div>
+    <div class="form-card">
+      <div class="form-section">
+        <div class="form-section-title"><div class="section-badge">💬</div><span data-fr="Envoi de messages WhatsApp" data-ar="إرسال رسائل واتساب">Envoi de messages WhatsApp</span></div>
+        <div class="info-box">
+          <p style="font-size:.95rem;color:var(--text-mid);line-height:1.7">
+            <span data-fr="Au moment du dépôt et quand une commande est prête, l'application génère automatiquement le message complet." data-ar="عند الإيداع وعند جاهزية الطلب، التطبيق يولد الرسالة تلقائياً.">
+              Au moment du dépôt et quand une commande est prête, l'application génère automatiquement le message complet.
+            </span>
+          </p>
+        </div>
+      </div>
+      <div class="form-section">
+        <div class="form-section-title"><div class="section-badge">🔔</div><span data-fr="Rappels automatiques" data-ar="التذكيرات التلقائية">Rappels automatiques</span></div>
+        <div style="background:var(--bg);border-radius:var(--radius);padding:18px 20px;margin-bottom:16px;border:1px solid var(--border)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+            <div>
+              <div style="font-weight:700;font-size:.95rem;color:var(--navy)" data-fr="Rappel mensuel — Article non récupéré" data-ar="تذكير شهري — قطعة لم تُستلم">Rappel mensuel — Article non récupéré</div>
+              <div style="font-size:.82rem;color:var(--text-light);margin-top:2px" data-fr="Envoyé chaque mois si l'article n'est pas retiré" data-ar="يُرسل كل شهر إذا لم تُستلم القطعة">Envoyé chaque mois si l'article n'est pas retiré</div>
+            </div>
+            <button class="btn btn-primary" onclick="runMonthlyReminders()" id="btnMonthly">
+              <span data-fr="Envoyer les rappels maintenant" data-ar="إرسال التذكيرات الآن">Envoyer les rappels maintenant</span>
+            </button>
+          </div>
+          <div id="monthlyRemindersList"></div>
+        </div>
+        <div style="background:var(--danger-bg);border-radius:var(--radius);padding:18px 20px;border:1px solid #FECACA">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+            <div>
+              <div style="font-weight:700;font-size:.95rem;color:var(--danger)" data-fr="Alerte 3 mois — Déclinaison de responsabilité" data-ar="تنبيه 3 أشهر — إخلاء المسؤولية">Alerte 3 mois — Déclinaison de responsabilité</div>
+              <div style="font-size:.82rem;color:#EF4444;margin-top:2px" data-fr="Envoyé aux clients dont l'article approche 3 mois non retiré" data-ar="يُرسل للزبائن الذين لم يستلموا قطعتهم منذ 3 أشهر">Envoyé aux clients dont l'article approche 3 mois non retiré</div>
+            </div>
+            <button class="btn btn-danger" onclick="runThreeMonthAlerts()" id="btnThreeMonth">
+              <span data-fr="Envoyer les alertes 3 mois" data-ar="إرسال تنبيهات 3 أشهر">Envoyer les alertes 3 mois</span>
+            </button>
+          </div>
+          <div id="threeMonthAlertsList"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal()"></div>
+<div class="modal" id="mainModal">
+  <button class="modal-close" onclick="closeModal()">✕</button>
+  <div id="modalContent"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/static/js/catalog_data.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
