@@ -150,7 +150,7 @@
           </div>
         </div>
         <div class="form-section">
-          <div class="form-section-title"><div class="section-badge">👔</div><span data-fr="Article et service" data-ar="القطعة ونوع الخدمة">Article et service</span></div>
+          <div class="form-section-title"><div class="section-badge">👔</div><span data-fr="Article et service" data-ar="القطعة ونوع الخدمة">Article et service</span><button type="button" class="btn btn-ghost" style="margin-left:auto;padding:4px 12px;font-size:.82rem" onclick="addExtraArticle()">➕ <span data-fr="Ajouter un article" data-ar="إضافة قطعة">Ajouter un article</span></button></div>
           <div class="form-grid">
             <div class="form-group">
               <label data-fr="Type d'article *" data-ar="نوع القطعة *">Type d'article *</label>
@@ -185,6 +185,9 @@
             <p class="form-hint" data-fr="Prix manuel — catalogue ignoré" data-ar="سعر يدوي">Prix manuel — catalogue ignoré</p>
           </div>
         </div>
+        <!-- Conteneur des articles supplémentaires -->
+        <div id="extraArticlesContainer"></div>
+
         <div class="form-section">
           <div class="form-section-title"><div class="section-badge">📅</div><span data-fr="Dates" data-ar="التواريخ">Dates</span></div>
           <div class="form-grid">
@@ -226,15 +229,6 @@
             <textarea name="notes" class="form-input" rows="3" placeholder="Taches, couleur, instructions spéciales..."></textarea>
           </div>
         </div>
-        <!-- Bouton pour ajouter un article supplémentaire au même client -->
-        <div style="display:flex;gap:10px;margin-bottom:10px">
-          <button type="button" class="btn btn-ghost btn-full" id="addArticleBtn" onclick="addExtraArticle()">
-            ➕ <span data-fr="Ajouter un autre article" data-ar="إضافة قطعة أخرى">Ajouter un autre article</span>
-          </button>
-        </div>
-        <!-- Conteneur des articles supplémentaires -->
-        <div id="extraArticlesContainer"></div>
-
         <button type="submit" class="btn btn-primary btn-lg btn-full" id="submitBtn">
           <span data-fr="Enregistrer le Dépôt" data-ar="حفظ الإيداع">Enregistrer le Dépôt</span>
         </button>
