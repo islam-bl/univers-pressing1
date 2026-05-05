@@ -220,6 +220,33 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
     const r = await fetch('/api/orders', { method: 'POST', body: fd });
     const d = await r.json();
     if (d.success) {
+      // Enregistrer les articles supplémentaires s'il y en a
+      const extras = document.querySelectorAll('[id^="extraArticle_"]');
+      const extraPromises = [];
+      extras.forEach(el => {
+        const idx = el.id.split('_')[1];
+        const artType = document.getElementById(`extraArticleSelect_${idx}`)?.value;
+        const svcType = document.getElementById(`extraServiceSelect_${idx}`)?.value;
+        const notes = el.querySelector(`[name="extra_notes_${idx}"]`)?.value || '';
+        if (artType && svcType) {
+          // Copie les infos client du formulaire principal pour l'article supplémentaire
+          const extraFd = new FormData();
+          extraFd.append('customer_name', fd.get('customer_name'));
+          extraFd.append('customer_phone', fd.get('customer_phone'));
+          extraFd.append('article_type', artType);
+          extraFd.append('service_type', svcType);
+          extraFd.append('deposit_date', fd.get('deposit_date'));
+          extraFd.append('expected_pickup_date', fd.get('expected_pickup_date'));
+          extraFd.append('is_high_value', '0');
+          extraFd.append('price_overridden', '0');
+          extraFd.append('final_price', '0');
+          extraFd.append('notes', notes);
+          extraPromises.push(fetch('/api/orders', { method: 'POST', body: extraFd }));
+        }
+      });
+      // Attendre que tous les articles supplémentaires soient enregistrés
+      if (extraPromises.length > 0) await Promise.all(extraPromises);
+
       showReceiptModal(d.order, d.whatsapp_msg);
       e.target.reset();
       setDates();
@@ -229,7 +256,11 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
       document.getElementById('photoText').style.display = 'block';
       document.getElementById('priceDisplay').style.display = 'none';
       document.getElementById('manualPriceGroup').style.display = 'none';
-      showToast(lang === 'fr' ? '✅ Dépôt enregistré !' : '✅ تم تسجيل الإيداع !', 'success');
+      // Réinitialiser les articles supplémentaires
+      document.getElementById('extraArticlesContainer').innerHTML = '';
+      extraArticleCount = 0;
+      const totalArticles = 1 + extraPromises.length;
+      showToast(lang === 'fr' ? `✅ ${totalArticles} article(s) enregistré(s) !` : `✅ تم تسجيل ${totalArticles} قطعة !`, 'success');
     } else { showToast('Erreur: ' + (d.error || ''), 'error'); }
   } catch(ex) { showToast('Erreur réseau', 'error'); }
   finally {
@@ -237,6 +268,94 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
     btn.innerHTML = `<span data-fr="Enregistrer le Dépôt" data-ar="حفظ الإيداع">${lang === 'fr' ? 'Enregistrer le Dépôt' : 'حفظ الإيداع'}</span>`;
   }
 });
+
+
+/* ════ ARTICLES SUPPLÉMENTAIRES ════ */
+// Compteur pour les articles supplémentaires
+let extraArticleCount = 0;
+
+/**
+ * Ajoute un bloc article/service supplémentaire dans le formulaire de dépôt.
+ * Permet d'enregistrer plusieurs articles pour le même client en une seule commande.
+ */
+function addExtraArticle() {
+  extraArticleCount++;
+  const idx = extraArticleCount;
+
+  // Construction des options article depuis le catalogue
+  let articleOpts = `<option value="">-- ${lang === 'fr' ? "Choisir l'article" : "اختر القطعة"} --</option>`;
+  Object.entries(CATALOG).forEach(([k, v]) => {
+    articleOpts += `<option value="${k}">${v.fr} / ${v.ar}</option>`;
+  });
+
+  // Construction des options service
+  let serviceOpts = `<option value="">-- ${lang === 'fr' ? 'Choisir le service' : 'اختر الخدمة'} --</option>`;
+  Object.entries(SERVICES).forEach(([k, v]) => {
+    serviceOpts += `<option value="${k}">${v.fr} / ${v.ar}</option>`;
+  });
+
+  const html = `
+    <div class="form-section" id="extraArticle_${idx}" style="border:2px dashed var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;position:relative">
+      <div class="form-section-title">
+        <div class="section-badge">👔</div>
+        <span>${lang === 'fr' ? 'Article supplémentaire' : 'قطعة إضافية'} #${idx}</span>
+        <button type="button" onclick="removeExtraArticle(${idx})" style="margin-left:auto;background:none;border:none;color:var(--danger);cursor:pointer;font-size:1.2rem">✕</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>${lang === 'fr' ? "Type d'article *" : "نوع القطعة *"}</label>
+          <select name="extra_article_type_${idx}" id="extraArticleSelect_${idx}" class="form-input" onchange="updateExtraPrice(${idx})">${articleOpts}</select>
+        </div>
+        <div class="form-group">
+          <label>${lang === 'fr' ? 'Service *' : 'الخدمة *'}</label>
+          <select name="extra_service_type_${idx}" id="extraServiceSelect_${idx}" class="form-input" onchange="updateExtraPrice(${idx})">${serviceOpts}</select>
+        </div>
+      </div>
+      <div id="extraPriceDisplay_${idx}" style="display:none;background:var(--accent-light);border-radius:var(--radius-sm);padding:10px 14px;margin-top:8px;font-size:.9rem;color:var(--primary);font-weight:600">
+        💰 ${lang === 'fr' ? 'Prix' : 'السعر'} : <span id="extraCatalogPrice_${idx}"></span>
+      </div>
+      <div class="form-group" style="margin-top:10px">
+        <label>${lang === 'fr' ? 'Notes (optionnel)' : 'ملاحظات (اختياري)'}</label>
+        <input type="text" name="extra_notes_${idx}" class="form-input" placeholder="${lang === 'fr' ? 'Taches, couleur...' : 'بقع، لون...'}"/>
+      </div>
+    </div>`;
+
+  document.getElementById('extraArticlesContainer').insertAdjacentHTML('beforeend', html);
+}
+
+/**
+ * Met à jour le prix affiché pour un article supplémentaire.
+ */
+function updateExtraPrice(idx) {
+  const article = document.getElementById(`extraArticleSelect_${idx}`).value;
+  const service = document.getElementById(`extraServiceSelect_${idx}`).value;
+  const pd = document.getElementById(`extraPriceDisplay_${idx}`);
+  if (!article || !service) { pd.style.display = 'none'; return; }
+  const art = CATALOG[article];
+  if (!art) { pd.style.display = 'none'; return; }
+  let priceText = 'N/D';
+  if (service === 'nettoyage_repassage') {
+    const n = art.nettoyage, r = art.repassage;
+    if (n != null && r != null) {
+      const nMin = typeof n === 'object' ? n.min : n;
+      const nDisplay = typeof n === 'object' ? `${n.min}-${n.max}` : n;
+      priceText = `${(nMin + r).toFixed(2)} DH`;
+    }
+  } else {
+    const p = art[service];
+    if (p != null) priceText = typeof p === 'object' ? `${p.min}-${p.max} DH` : `${p.toFixed(2)} DH`;
+  }
+  pd.style.display = 'flex';
+  document.getElementById(`extraCatalogPrice_${idx}`).textContent = priceText;
+}
+
+/**
+ * Supprime un bloc article supplémentaire du formulaire.
+ */
+function removeExtraArticle(idx) {
+  const el = document.getElementById(`extraArticle_${idx}`);
+  if (el) el.remove();
+}
 
 /* ════ RECEIPT MODAL ════ */
 function showReceiptModal(order, waMsg) {
@@ -382,6 +501,8 @@ function orderCardHTML(o, compact) {
   const st = badges[o.status] || badges.received;
   const hvTag = o.is_high_value ? `<span style="background:var(--accent-light);color:#92400E;padding:2px 7px;border-radius:10px;font-size:.7rem;font-weight:700;margin-left:6px">⭐ ${lang==='fr'?'Haute valeur':'قيمة عالية'}</span>` : '';
   const readyBtn = !compact && o.status==='received' ? `<button class="btn btn-success" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();markReady(${o.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>` : '';
+  // Bouton supprimer visible pour tous les rôles (gérant ET employé)
+  const deleteBtn = !compact ? `<button class="btn btn-danger" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();deleteOrder(${o.id})">🗑️ ${lang==='fr'?'Supprimer':'حذف'}</button>` : '';
 
   return `<div class="order-card s-${o.status}" onclick="openDetail(${o.id})">
     <div class="order-main">
@@ -396,7 +517,7 @@ function orderCardHTML(o, compact) {
       <div class="order-price-unit">MAD</div>
       <div class="order-date">📅 ${o.expected_pickup_date}</div>
     </div>
-    ${!compact ? `<div class="order-actions">${readyBtn}<button class="btn btn-ghost" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();openDetail(${o.id})">🔍 ${lang==='fr'?'Détails':'تفاصيل'}</button></div>` : ''}
+    ${!compact ? `<div class="order-actions">${readyBtn}<button class="btn btn-ghost" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();openDetail(${o.id})">🔍 ${lang==='fr'?'Détails':'تفاصيل'}</button>${deleteBtn}</div>` : ''}
   </div>`;
 }
 
@@ -464,7 +585,7 @@ async function openDetail(id) {
         ${o.status==='received'?`<button class="btn btn-success" onclick="closeModal();markReady(${o.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>`:''}
         <button class="btn btn-primary" onclick="showReceiptModal(${JSON.stringify(o).replace(/"/g,'&quot;')})">🧾 ${lang==='fr'?'Reçu':'إيصال'}</button>
         ${o.status!=='completed'?`<button class="btn btn-warning" onclick="openEditModal(${o.id})">✏️ ${lang==='fr'?'Modifier':'تعديل'}</button>`:''}
-        ${currentUserRole==='gerant'?`<button class="btn btn-danger" onclick="deleteOrder(${o.id})">🗑️ ${lang==='fr'?'Supprimer':'حذف'}</button>`:''}
+        <button class="btn btn-danger" onclick="deleteOrder(${o.id})">🗑️ ${lang==='fr'?'Supprimer':'حذف'}</button>
         <button class="btn btn-ghost" onclick="closeModal()">${lang==='fr'?'Fermer':'إغلاق'}</button>
       </div>
     </div>`;

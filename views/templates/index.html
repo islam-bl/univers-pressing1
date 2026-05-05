@@ -226,6 +226,15 @@
             <textarea name="notes" class="form-input" rows="3" placeholder="Taches, couleur, instructions spéciales..."></textarea>
           </div>
         </div>
+        <!-- Bouton pour ajouter un article supplémentaire au même client -->
+        <div style="display:flex;gap:10px;margin-bottom:10px">
+          <button type="button" class="btn btn-ghost btn-full" id="addArticleBtn" onclick="addExtraArticle()">
+            ➕ <span data-fr="Ajouter un autre article" data-ar="إضافة قطعة أخرى">Ajouter un autre article</span>
+          </button>
+        </div>
+        <!-- Conteneur des articles supplémentaires -->
+        <div id="extraArticlesContainer"></div>
+
         <button type="submit" class="btn btn-primary btn-lg btn-full" id="submitBtn">
           <span data-fr="Enregistrer le Dépôt" data-ar="حفظ الإيداع">Enregistrer le Dépôt</span>
         </button>

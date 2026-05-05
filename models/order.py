@@ -1,30 +1,41 @@
+# ══════════════════════════════════════════════════════════════
+# models/order.py — Modèle Commande
+# Gère toutes les opérations CRUD sur les commandes du pressing.
+# Supporte SQLite (local) et PostgreSQL (production Railway).
+# Chaque commande est liée à un utilisateur via created_by.
+# ══════════════════════════════════════════════════════════════
+
 import random, string
 from datetime import datetime
 from models.database import get_db, DATABASE_URL
 from models.catalog import CATALOG, SERVICE_TYPES, get_price
 
+# Placeholder SQL : %s pour PostgreSQL, ? pour SQLite
 PH = '%s' if DATABASE_URL else '?'
 
-def row_to_dict(row):
-    if row is None:
-        return None
-    if DATABASE_URL:
-        return dict(row)
-    return dict(row)
-
 class Order:
+
     @staticmethod
     def generate_order_number():
+        """Génère un numéro de commande unique : UP-YYYYMMDD-XXXX"""
         date = datetime.now().strftime('%Y%m%d')
         rand = ''.join(random.choices(string.digits, k=4))
         return f"UP-{date}-{rand}"
 
     @staticmethod
     def generate_pickup_code():
+        """Génère un code de retrait aléatoire de 6 caractères alphanumériques"""
         return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
     @staticmethod
     def create(data, photo_filename=None, user_id=None):
+        """
+        Crée une nouvelle commande dans la base de données.
+        - data : dictionnaire contenant les champs du formulaire
+        - photo_filename : nom du fichier photo (optionnel)
+        - user_id : ID de l'utilisateur connecté (pour l'isolation des données)
+        Retourne la commande créée enrichie avec les labels du catalogue.
+        """
         order_number = Order.generate_order_number()
         pickup_code  = Order.generate_pickup_code()
         base_price   = get_price(data.get('article_type'), data.get('service_type')) or 0.0
@@ -81,6 +92,10 @@ class Order:
 
     @staticmethod
     def get_by_id(order_id):
+        """
+        Récupère une commande par son ID avec son historique complet.
+        Retourne None si la commande n'existe pas.
+        """
         conn = get_db()
         if DATABASE_URL:
             c = conn.cursor()
@@ -101,6 +116,10 @@ class Order:
 
     @staticmethod
     def get_by_pickup_code(code, status='ready'):
+        """
+        Récupère une commande par son code de retrait et son statut.
+        Utilisé lors du retrait d'un article par le client.
+        """
         conn = get_db()
         if DATABASE_URL:
             c = conn.cursor()
@@ -115,18 +134,34 @@ class Order:
         return Order._enrich(dict(row))
 
     @staticmethod
-    def list_by_status(status=None):
+    def list_by_status(status=None, user_id=None):
+        """
+        Liste les commandes filtrées par statut ET par utilisateur.
+        - status : 'received', 'ready', 'completed' ou None (toutes)
+        - user_id : ID de l'utilisateur connecté — chaque utilisateur
+          ne voit que SES propres commandes (isolation des données).
+        """
         conn = get_db()
         if DATABASE_URL:
             c = conn.cursor()
-            if status:
+            if status and user_id:
+                # Filtre par statut ET par utilisateur
+                c.execute(f'SELECT * FROM orders WHERE status={PH} AND created_by={PH} ORDER BY created_at DESC', (status, user_id))
+            elif user_id:
+                # Filtre par utilisateur uniquement
+                c.execute(f'SELECT * FROM orders WHERE created_by={PH} ORDER BY created_at DESC', (user_id,))
+            elif status:
                 c.execute(f'SELECT * FROM orders WHERE status={PH} ORDER BY created_at DESC', (status,))
             else:
                 c.execute('SELECT * FROM orders ORDER BY created_at DESC')
             rows = c.fetchall()
             c.close()
         else:
-            if status:
+            if status and user_id:
+                rows = conn.execute(f'SELECT * FROM orders WHERE status={PH} AND created_by={PH} ORDER BY created_at DESC',(status, user_id)).fetchall()
+            elif user_id:
+                rows = conn.execute(f'SELECT * FROM orders WHERE created_by={PH} ORDER BY created_at DESC',(user_id,)).fetchall()
+            elif status:
                 rows = conn.execute(f'SELECT * FROM orders WHERE status={PH} ORDER BY created_at DESC',(status,)).fetchall()
             else:
                 rows = conn.execute('SELECT * FROM orders ORDER BY created_at DESC').fetchall()
@@ -135,6 +170,11 @@ class Order:
 
     @staticmethod
     def update_status(order_id, new_status):
+        """
+        Met à jour le statut d'une commande.
+        Statuts possibles : 'received' → 'ready' → 'completed'
+        Enregistre le changement dans l'historique.
+        """
         conn = get_db()
         if DATABASE_URL:
             c = conn.cursor()
@@ -144,6 +184,7 @@ class Order:
                 c.close(); conn.close(); return None
             old_status = row['status']
             if new_status == 'completed':
+                # Enregistre la date réelle de retrait
                 c.execute(f'UPDATE orders SET status={PH},actual_pickup_date={PH},updated_at=CURRENT_TIMESTAMP WHERE id={PH}',
                          (new_status, datetime.now().strftime('%Y-%m-%d'), order_id))
             else:
@@ -173,6 +214,10 @@ class Order:
 
     @staticmethod
     def update(order_id, data, photo_filename=None):
+        """
+        Modifie les informations d'une commande existante.
+        Conserve la photo actuelle si aucune nouvelle photo n'est fournie.
+        """
         conn = get_db()
         if DATABASE_URL:
             c = conn.cursor()
@@ -237,6 +282,10 @@ class Order:
 
     @staticmethod
     def delete(order_id):
+        """
+        Supprime définitivement une commande et tout son historique.
+        Retourne True si supprimée, False si introuvable.
+        """
         conn = get_db()
         if DATABASE_URL:
             c = conn.cursor()
@@ -257,26 +306,46 @@ class Order:
         return True
 
     @staticmethod
-    def search(q):
+    def search(q, user_id=None):
+        """
+        Recherche des commandes par nom client, téléphone, numéro ou code.
+        Filtré par user_id pour n'afficher que les commandes de l'utilisateur connecté.
+        """
         conn = get_db()
         if DATABASE_URL:
             c = conn.cursor()
-            c.execute(f'''SELECT * FROM orders WHERE
-                customer_name ILIKE {PH} OR customer_phone ILIKE {PH} OR order_number ILIKE {PH} OR pickup_code ILIKE {PH}
-                ORDER BY created_at DESC LIMIT 50''',
-                (f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%'))
+            if user_id:
+                c.execute(f'''SELECT * FROM orders WHERE created_by={PH} AND (
+                    customer_name ILIKE {PH} OR customer_phone ILIKE {PH} OR order_number ILIKE {PH} OR pickup_code ILIKE {PH})
+                    ORDER BY created_at DESC LIMIT 50''',
+                    (user_id, f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%'))
+            else:
+                c.execute(f'''SELECT * FROM orders WHERE
+                    customer_name ILIKE {PH} OR customer_phone ILIKE {PH} OR order_number ILIKE {PH} OR pickup_code ILIKE {PH}
+                    ORDER BY created_at DESC LIMIT 50''',
+                    (f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%'))
             rows = c.fetchall()
             c.close()
         else:
-            rows = conn.execute(f'''SELECT * FROM orders WHERE
-                customer_name LIKE {PH} OR customer_phone LIKE {PH} OR order_number LIKE {PH} OR pickup_code LIKE {PH}
-                ORDER BY created_at DESC LIMIT 50''',
-                (f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%')).fetchall()
+            if user_id:
+                rows = conn.execute(f'''SELECT * FROM orders WHERE created_by={PH} AND (
+                    customer_name LIKE {PH} OR customer_phone LIKE {PH} OR order_number LIKE {PH} OR pickup_code LIKE {PH})
+                    ORDER BY created_at DESC LIMIT 50''',
+                    (user_id, f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%')).fetchall()
+            else:
+                rows = conn.execute(f'''SELECT * FROM orders WHERE
+                    customer_name LIKE {PH} OR customer_phone LIKE {PH} OR order_number LIKE {PH} OR pickup_code LIKE {PH}
+                    ORDER BY created_at DESC LIMIT 50''',
+                    (f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%')).fetchall()
         conn.close()
         return [Order._enrich(dict(r)) for r in rows]
 
     @staticmethod
     def _enrich(order):
+        """
+        Enrichit une commande avec les labels français/arabe du catalogue.
+        Ajoute article_fr, article_ar, service_fr, service_ar.
+        """
         art = CATALOG.get(order.get('article_type'), {})
         svc = SERVICE_TYPES.get(order.get('service_type'), {})
         order['article_fr'] = art.get('fr', order.get('article_type',''))
