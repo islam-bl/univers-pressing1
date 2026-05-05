@@ -180,6 +180,7 @@ function updatePrice() {
   } else {
     pd.style.display = 'none';
   }
+  updateOrderTotal();
 }
 
 function toggleHighValue() {
@@ -263,6 +264,8 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
       // Réinitialiser les articles supplémentaires
       document.getElementById('extraArticlesContainer').innerHTML = '';
       extraArticleCount = 0;
+      const totalDisplay = document.getElementById('orderTotalDisplay');
+      if (totalDisplay) totalDisplay.style.display = 'none';
       const totalArticles = 1 + extraResults.length;
       showToast(lang === 'fr' ? `✅ ${totalArticles} article(s) enregistré(s) !` : `✅ تم تسجيل ${totalArticles} قطعة !`, 'success');
     } else { showToast('Erreur: ' + (d.error || ''), 'error'); }
@@ -274,12 +277,45 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
 });
 
 
+function updateOrderTotal() {
+  // Calcul du prix de l'article principal
+  const mainArt = document.getElementById('articleSelect').value;
+  const mainSvc = document.getElementById('serviceSelect').value;
+  const highVal = document.getElementById('highValueToggle').checked;
+  let mainPrice = 0;
+  if (highVal) {
+    mainPrice = parseFloat(document.getElementById('finalPriceInput').value) || 0;
+  } else if (mainArt && mainSvc) {
+    mainPrice = getPrice(mainArt, mainSvc) || 0;
+  }
+
+  // Calcul des prix des articles supplémentaires
+  let extrasTotal = 0;
+  const extras = document.querySelectorAll('[id^="extraArticle_"]');
+  extras.forEach(el => {
+    const idx = el.id.split('_')[1];
+    const artV = document.getElementById(`extraArticleSelect_${idx}`)?.value;
+    const svcV = document.getElementById(`extraServiceSelect_${idx}`)?.value;
+    if (artV && svcV) extrasTotal += getPrice(artV, svcV) || 0;
+  });
+
+  const total = mainPrice + extrasTotal;
+  const totalEl = document.getElementById('orderTotalDisplay');
+  if (totalEl) {
+    if (extras.length > 0 || (mainArt && mainSvc)) {
+      totalEl.style.display = 'flex';
+      document.getElementById('orderTotalAmount').textContent = total.toFixed(2) + ' MAD';
+    } else {
+      totalEl.style.display = 'none';
+    }
+  }
+}
+
+
+
 /* ════ ARTICLES SUPPLÉMENTAIRES ════ */
 // Compteur pour les articles supplémentaires
 let extraArticleCount = 0;
-
-/**
- * Ajoute un bloc article/service supplémentaire dans le formulaire de dépôt.
  * Permet d'enregistrer plusieurs articles pour le même client en une seule commande.
  */
 function addExtraArticle() {
@@ -325,6 +361,7 @@ function addExtraArticle() {
     </div>`;
 
   document.getElementById('extraArticlesContainer').insertAdjacentHTML('beforeend', html);
+  updateOrderTotal();
 }
 
 /**
@@ -351,6 +388,7 @@ function updateExtraPrice(idx) {
   }
   pd.style.display = 'flex';
   document.getElementById(`extraCatalogPrice_${idx}`).textContent = priceText;
+  updateOrderTotal();
 }
 
 /**
@@ -359,6 +397,7 @@ function updateExtraPrice(idx) {
 function removeExtraArticle(idx) {
   const el = document.getElementById(`extraArticle_${idx}`);
   if (el) el.remove();
+  updateOrderTotal();
 }
 
 /* ════ RECEIPT MODAL ════ */
@@ -659,6 +698,24 @@ function showWAPrompt(order, waMsg) {
 async function openDetail(id) {
   openModal('<div class="loading-spinner"><div class="spinner"></div></div>');
   const o = await fetch(`/api/orders/${id}`).then(r=>r.json());
+
+  // Chercher les commandes du même client déposées le même jour (articles groupés)
+  let groupOrders = [];
+  try {
+    const allRec = await fetch(`/api/orders?status=received`).then(r=>r.json());
+    const allRdy = await fetch(`/api/orders?status=ready`).then(r=>r.json());
+    const allComp = await fetch(`/api/orders?status=completed`).then(r=>r.json());
+    const allFetched = [...allRec, ...allRdy, ...allComp];
+    groupOrders = allFetched.filter(x =>
+      x.customer_phone === o.customer_phone &&
+      x.deposit_date === o.deposit_date &&
+      x.id !== o.id
+    );
+  } catch(e) {}
+
+  const isGrouped = groupOrders.length > 0;
+  const allGroupOrders = isGrouped ? [o, ...groupOrders].sort((a,b)=>a.id-b.id) : [o];
+
   const art = CATALOG[o.article_type]||{};
   const artFR = o.article_fr||art.fr||o.article_type;
   const artAR = o.article_ar||art.ar||'';
@@ -666,29 +723,75 @@ async function openDetail(id) {
   const statusLabel = {received:lang==='fr'?'Reçu':'مستلم',ready:lang==='fr'?'Prêt':'جاهز',completed:lang==='fr'?'Terminé':'مكتمل'};
   const badges = {received:'badge-received',ready:'badge-ready',completed:'badge-completed'};
   const hist = (o.history||[]).map(h=>`<li class="history-item"><div class="history-dot"></div><div><div style="font-weight:600;color:var(--text)">${h.action} — ${h.details||''}</div><div style="font-size:.78rem;color:var(--text-light)">${h.timestamp}</div></div></li>`).join('');
+
+  // Si commande groupée : afficher tous les articles avec leur statut individuel
+  let groupedArticlesHTML = '';
+  if (isGrouped) {
+    const totalGroup = allGroupOrders.reduce((s,x)=>s+parseFloat(x.final_price||0),0);
+    const allReady = allGroupOrders.every(x=>x.status!=='received');
+    const groupRows = allGroupOrders.map((x,i)=>{
+      const xArt = CATALOG[x.article_type]||{};
+      const xArtL = x.article_fr||xArt[lang==='fr'?'fr':'ar']||x.article_type;
+      const xSvcL = x.service_fr||SERVICES[x.service_type]?.[lang==='fr'?'fr':'ar']||'';
+      const xBadge = badges[x.status]||'badge-received';
+      const xLabel = statusLabel[x.status]||'';
+      const xReadyBtn = x.status==='received'
+        ? `<button class="btn btn-success" style="padding:5px 10px;font-size:.78rem;margin-top:6px" onclick="markArticleReady(${x.id},${o.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>`
+        : `<span style="font-size:.78rem;color:var(--success,#22c55e);font-weight:700">✅ ${xLabel}</span>`;
+      return `<div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--primary)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
+          <div>
+            <div style="font-weight:700;font-size:.9rem;color:var(--navy)">${i+1}. ${xArtL}</div>
+            <div style="font-size:.8rem;color:var(--text-mid)">${xSvcL} · <span class="badge ${xBadge}" style="font-size:.72rem">${xLabel}</span></div>
+            <div style="font-size:.78rem;color:var(--text-light);margin-top:2px">Code: <b>${x.pickup_code}</b></div>
+            ${xReadyBtn}
+          </div>
+          <div style="font-weight:800;color:var(--primary);font-size:1rem">${parseFloat(x.final_price||0).toFixed(2)} MAD</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    groupedArticlesHTML = `
+      <div style="margin:14px 0">
+        <div style="font-weight:700;font-size:.9rem;color:var(--navy);margin-bottom:8px">
+          📦 ${lang==='fr'?`${allGroupOrders.length} articles dans ce dépôt`:`${allGroupOrders.length} قطع في هذا الإيداع`}
+        </div>
+        ${groupRows}
+        <div style="background:var(--navy,#0F172A);color:#fff;border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+          <span style="font-weight:700;font-size:.88rem">${lang==='fr'?'TOTAL COMMANDE':'مجموع الطلب'}</span>
+          <span style="font-size:1.2rem;font-weight:800">${totalGroup.toFixed(2)} MAD</span>
+        </div>
+        ${!allReady ? `<div style="font-size:.8rem;color:var(--text-mid);margin-top:8px;font-style:italic">ℹ️ ${lang==='fr'?'La commande sera marquée prête quand tous les articles seront prêts.':'يُعلَّم الطلب جاهزًا عند جهوز جميع القطع.'}</div>` : ''}
+      </div>`;
+  }
+
   const html = `
     <div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
         <h2 style="font-weight:800;font-size:1.3rem;color:var(--navy)">${o.order_number}</h2>
         <span class="badge ${badges[o.status]||'badge-received'}">${statusLabel[o.status]||''}</span>
         ${o.is_high_value?`<span style="background:var(--accent-light);color:#92400E;padding:3px 10px;border-radius:10px;font-size:.75rem;font-weight:700">⭐ Haute valeur</span>`:''}
+        ${isGrouped?`<span style="background:#DBEAFE;color:#1D4ED8;padding:3px 10px;border-radius:10px;font-size:.75rem;font-weight:700">📦 ${lang==='fr'?'Dépôt groupé':'إيداع متعدد'}</span>`:''}
       </div>
       <div class="detail-grid">
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Client':'الزبون'}</div><div class="detail-item-value">${o.customer_name}</div></div>
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Téléphone':'رقم الهاتف'}</div><div class="detail-item-value">${o.customer_phone}</div></div>
+        ${!isGrouped?`
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Article':'القطعة'}</div><div class="detail-item-value">${artFR} / ${artAR}</div></div>
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Type de service':'نوع الخدمة'}</div><div class="detail-item-value">${svcFR}</div></div>
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Prix':'السعر'}</div><div class="detail-item-value" style="font-size:1.1rem;color:var(--primary);font-weight:800">${parseFloat(o.final_price||0).toFixed(2)} MAD</div></div>
+        `:''}
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Code retrait':'رمز الاستلام'}</div><div class="detail-item-value" style="font-size:1.1rem;color:var(--primary);font-weight:800;letter-spacing:.12em">${o.pickup_code}</div></div>
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Date de dépôt':'تاريخ الاستلام'}</div><div class="detail-item-value">${o.deposit_date}</div></div>
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Date de retrait':'تاريخ التسليم'}</div><div class="detail-item-value">${o.expected_pickup_date}</div></div>
         ${o.authorized_person_name?`<div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Personne autorisée':'الشخص المفوّض'}</div><div class="detail-item-value">${o.authorized_person_name} (${o.authorized_person_relation||'—'})</div></div>`:''}
       </div>
+      ${groupedArticlesHTML}
       ${o.article_photo?`<img src="/static/uploads/${o.article_photo}" style="max-width:100%;border-radius:var(--radius);margin:12px 0;box-shadow:var(--shadow)" alt="photo"/>`:''}
       ${o.notes?`<div style="background:var(--bg);border-radius:var(--radius-sm);padding:12px 14px;font-size:.9rem;color:var(--text-mid);margin:8px 0">${o.notes}</div>`:''}
       ${hist?`<div style="margin-top:16px"><div style="font-weight:700;font-size:.9rem;color:var(--navy);margin-bottom:8px">Historique</div><ul class="history-timeline">${hist}</ul></div>`:''}
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
-        ${o.status==='received'?`<button class="btn btn-success" onclick="closeModal();markReady(${o.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>`:''}
+        ${!isGrouped && o.status==='received'?`<button class="btn btn-success" onclick="closeModal();markReady(${o.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>`:''}
         <button class="btn btn-primary" onclick="showReceiptModal(${JSON.stringify(o).replace(/"/g,'&quot;')})">🧾 ${lang==='fr'?'Reçu':'إيصال'}</button>
         ${o.status!=='completed'?`<button class="btn btn-warning" onclick="openEditModal(${o.id})">✏️ ${lang==='fr'?'Modifier':'تعديل'}</button>`:''}
         <button class="btn btn-danger" onclick="deleteOrder(${o.id})">🗑️ ${lang==='fr'?'Supprimer':'حذف'}</button>
@@ -697,6 +800,24 @@ async function openDetail(id) {
     </div>`;
   document.getElementById('modalContent').innerHTML = html;
 }
+
+/**
+ * Marque un article individuel comme prêt.
+ * Si tous les articles du groupe sont prêts, la commande principale aussi.
+ */
+async function markArticleReady(articleId, mainOrderId) {
+  if (!confirm(lang==='fr'?'Marquer cet article comme prêt ?':'تعيين هذه القطعة كجاهزة؟')) return;
+  const r = await fetch(`/api/orders/${articleId}/status`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'ready'})});
+  const d = await r.json();
+  if (d.success) {
+    showToast(lang==='fr'?'✅ Article marqué prêt !':'✅ تم تعيين القطعة كجاهزة !','success');
+    loadOrders(); loadDashboard();
+    // Ré-ouvrir le détail pour rafraîchir
+    openDetail(mainOrderId);
+  }
+}
+
+
 
 /* ════ EDIT ORDER ════ */
 async function openEditModal(id) {
