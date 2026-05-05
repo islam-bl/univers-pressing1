@@ -316,6 +316,9 @@ function updateOrderTotal() {
 /* ════ ARTICLES SUPPLÉMENTAIRES ════ */
 // Compteur pour les articles supplémentaires
 let extraArticleCount = 0;
+
+/**
+ * Ajoute un bloc article/service supplémentaire dans le formulaire de dépôt.
  * Permet d'enregistrer plusieurs articles pour le même client en une seule commande.
  */
 function addExtraArticle() {
