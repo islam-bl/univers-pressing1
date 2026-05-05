@@ -220,16 +220,18 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
     const r = await fetch('/api/orders', { method: 'POST', body: fd });
     const d = await r.json();
     if (d.success) {
-      // Enregistrer les articles supplémentaires s'il y en a
+      // Enregistrer les articles supplémentaires avec leur prix correct
       const extras = document.querySelectorAll('[id^="extraArticle_"]');
-      const extraPromises = [];
-      extras.forEach(el => {
+      const extraResults = [];
+
+      for (const el of extras) {
         const idx = el.id.split('_')[1];
         const artType = document.getElementById(`extraArticleSelect_${idx}`)?.value;
         const svcType = document.getElementById(`extraServiceSelect_${idx}`)?.value;
         const notes = el.querySelector(`[name="extra_notes_${idx}"]`)?.value || '';
         if (artType && svcType) {
-          // Copie les infos client du formulaire principal pour l'article supplémentaire
+          // Calcul du prix correct depuis le catalogue
+          const extraPrice = getPrice(artType, svcType) || 0;
           const extraFd = new FormData();
           extraFd.append('customer_name', fd.get('customer_name'));
           extraFd.append('customer_phone', fd.get('customer_phone'));
@@ -239,15 +241,17 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
           extraFd.append('expected_pickup_date', fd.get('expected_pickup_date'));
           extraFd.append('is_high_value', '0');
           extraFd.append('price_overridden', '0');
-          extraFd.append('final_price', '0');
+          extraFd.append('final_price', extraPrice.toString());
           extraFd.append('notes', notes);
-          extraPromises.push(fetch('/api/orders', { method: 'POST', body: extraFd }));
+          const resp = await fetch('/api/orders', { method: 'POST', body: extraFd });
+          const extraData = await resp.json();
+          if (extraData.success) extraResults.push(extraData.order);
         }
-      });
-      // Attendre que tous les articles supplémentaires soient enregistrés
-      if (extraPromises.length > 0) await Promise.all(extraPromises);
+      }
 
-      showReceiptModal(d.order, d.whatsapp_msg);
+      // Afficher un reçu combiné avec TOUS les articles et le total
+      showMultiReceiptModal(d.order, extraResults, d.whatsapp_msg);
+
       e.target.reset();
       setDates();
       buildServiceSelect();
@@ -259,7 +263,7 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
       // Réinitialiser les articles supplémentaires
       document.getElementById('extraArticlesContainer').innerHTML = '';
       extraArticleCount = 0;
-      const totalArticles = 1 + extraPromises.length;
+      const totalArticles = 1 + extraResults.length;
       showToast(lang === 'fr' ? `✅ ${totalArticles} article(s) enregistré(s) !` : `✅ تم تسجيل ${totalArticles} قطعة !`, 'success');
     } else { showToast('Erreur: ' + (d.error || ''), 'error'); }
   } catch(ex) { showToast('Erreur réseau', 'error'); }
@@ -399,6 +403,108 @@ function showReceiptModal(order, waMsg) {
         <div style="display:flex;gap:10px;margin-top:14px">
           <button class="btn btn-primary btn-full" onclick="printReceipt()">🖨️ ${lang==='fr'?'Imprimer':'طباعة'}</button>
           <button class="btn btn-ghost btn-full" onclick="closeModal()">${lang==='fr'?'Fermer':'إغلاق'}</button>
+        </div>
+      </div>
+    </div>`;
+  openModal(html);
+}
+
+
+/* ════ REÇU MULTI-ARTICLES ════ */
+/**
+ * Affiche un reçu combiné pour plusieurs articles du même client.
+ * Calcule le total général de tous les articles.
+ * - mainOrder : la commande principale
+ * - extraOrders : tableau des commandes supplémentaires
+ * - waMsg : message WhatsApp de la commande principale
+ */
+function showMultiReceiptModal(mainOrder, extraOrders, waMsg) {
+  // Si pas d'articles supplémentaires, afficher le reçu simple
+  if (!extraOrders || extraOrders.length === 0) {
+    showReceiptModal(mainOrder, waMsg);
+    return;
+  }
+
+  // Regrouper tous les articles (principal + supplémentaires)
+  const allOrders = [mainOrder, ...extraOrders];
+
+  // Calcul du total général
+  const total = allOrders.reduce((sum, o) => sum + parseFloat(o.final_price || 0), 0);
+
+  // Construire les lignes du reçu pour chaque article
+  const articleRows = allOrders.map((o, i) => {
+    const art = CATALOG[o.article_type] || {};
+    const artL = o.article_fr || art[lang === 'fr' ? 'fr' : 'ar'] || o.article_type;
+    const svcL = o.service_fr || SERVICES[o.service_type]?.[lang === 'fr' ? 'fr' : 'ar'] || '';
+    return `
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--primary)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:700;font-size:.9rem;color:var(--navy)">${i + 1}. ${artL}</div>
+            <div style="font-size:.8rem;color:var(--text-mid)">${svcL} · Code: <b>${o.pickup_code}</b></div>
+          </div>
+          <div style="font-weight:800;color:var(--primary);font-size:1rem">${parseFloat(o.final_price || 0).toFixed(2)} MAD</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Préparer le lien WhatsApp avec le total
+  const phone = mainOrder.customer_phone?.replace(/\D/g, '') || '';
+  const waPhone = phone.startsWith('0') ? '212' + phone.slice(1) : phone;
+  const waLink = `https://wa.me/${waPhone}?text=${encodeURIComponent(waMsg || '')}`;
+
+  const html = `
+    <div>
+      <div class="receipt" id="printZone">
+        <div class="receipt-header">
+          <div class="receipt-logo-wrap"><img src="/static/images/logo.png" alt="Logo"/></div>
+          <div class="receipt-company">Univers Pressing</div>
+          <div class="receipt-company-ar">عالم التصبين</div>
+          <div class="receipt-order">${lang === 'fr' ? 'Dépôt multiple' : 'إيداع متعدد'}</div>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">${lang === 'fr' ? 'Client' : 'الزبون'}</span>
+          <span class="receipt-val">${mainOrder.customer_name}</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">${lang === 'fr' ? 'Téléphone' : 'رقم الهاتف'}</span>
+          <span class="receipt-val">${mainOrder.customer_phone}</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">${lang === 'fr' ? 'Date dépôt' : 'تاريخ الإيداع'}</span>
+          <span class="receipt-val">${mainOrder.deposit_date}</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">${lang === 'fr' ? 'Retrait prévu' : 'الاستلام المتوقع'}</span>
+          <span class="receipt-val">${mainOrder.expected_pickup_date}</span>
+        </div>
+
+        <!-- Liste des articles avec prix individuels -->
+        <div style="margin:14px 0 8px;font-weight:700;font-size:.85rem;color:var(--navy);text-transform:uppercase;letter-spacing:.05em">
+          ${lang === 'fr' ? `${allOrders.length} Articles` : `${allOrders.length} قطع`}
+        </div>
+        ${articleRows}
+
+        <!-- Total général -->
+        <div class="receipt-total">
+          <div style="font-size:.8rem;opacity:.7">${lang === 'fr' ? 'TOTAL GÉNÉRAL' : 'المجموع الكلي'}</div>
+          <div class="receipt-total-amt">${total.toFixed(2)} MAD</div>
+        </div>
+      </div>
+
+      <!-- Boutons WhatsApp et actions -->
+      <div class="no-print">
+        ${waMsg ? `<div class="whatsapp-cta" style="margin-top:14px">
+          <p>💬 ${lang === 'fr' ? 'Message prêt à envoyer au client :' : 'الرسالة جاهزة للإرسال :'}</p>
+          <div class="whatsapp-msg">${waMsg}</div>
+          <div class="whatsapp-btns">
+            <button class="btn btn-success" onclick="window.open('${waLink}','_blank')">📱 WhatsApp</button>
+            <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(${JSON.stringify(waMsg)});showToast('${lang === 'fr' ? 'Copié !' : 'تم النسخ !'}','success')">📋 ${lang === 'fr' ? 'Copier' : 'نسخ'}</button>
+          </div>
+        </div>` : ''}
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn btn-primary btn-full" onclick="printReceipt()">🖨️ ${lang === 'fr' ? 'Imprimer' : 'طباعة'}</button>
+          <button class="btn btn-ghost btn-full" onclick="closeModal()">${lang === 'fr' ? 'Fermer' : 'إغلاق'}</button>
         </div>
       </div>
     </div>`;
