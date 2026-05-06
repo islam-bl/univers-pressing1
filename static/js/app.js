@@ -203,55 +203,70 @@ function previewPhoto(input) {
   }
 }
 
+function collectDepositItems(fd) {
+  const items = [];
+  const mainArticle = (fd.get('article_type') || '').toString();
+  const mainService = (fd.get('service_type') || '').toString();
+  const mainHighValue = document.getElementById('highValueToggle').checked;
+
+  if (mainArticle && mainService) {
+    const mainCatalogPrice = getPrice(mainArticle, mainService) || 0;
+    const mainFinalPrice = mainHighValue
+      ? (parseFloat(document.getElementById('finalPriceInput').value) || mainCatalogPrice || 0)
+      : mainCatalogPrice;
+    items.push({
+      article_type: mainArticle,
+      service_type: mainService,
+      is_high_value: mainHighValue ? 1 : 0,
+      price_overridden: mainHighValue ? 1 : 0,
+      final_price: mainFinalPrice,
+      notes: (fd.get('notes') || '').toString(),
+    });
+  }
+
+  document.querySelectorAll('[id^="extraArticle_"]').forEach(el => {
+    const idx = el.id.split('_')[1];
+    const articleType = document.getElementById(`extraArticleSelect_${idx}`)?.value || '';
+    const serviceType = document.getElementById(`extraServiceSelect_${idx}`)?.value || '';
+    if (!articleType || !serviceType) return;
+    items.push({
+      article_type: articleType,
+      service_type: serviceType,
+      is_high_value: 0,
+      price_overridden: 0,
+      final_price: getPrice(articleType, serviceType) || 0,
+      notes: el.querySelector(`[name="extra_notes_${idx}"]`)?.value || '',
+    });
+  });
+
+  return items;
+}
+
 document.getElementById('depositForm').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0 auto"></div>';
+
   const fd = new FormData(e.target);
-  const high = document.getElementById('highValueToggle').checked;
-  fd.set('is_high_value', high ? '1' : '0');
-  if (!high) {
-    const art = fd.get('article_type'), svc = fd.get('service_type');
-    const price = getPrice(art, svc);
-    fd.set('final_price', (price || 0).toString());
-    fd.set('price_overridden', '0');
+  const items = collectDepositItems(fd);
+  if (!items.length) {
+    showToast(lang === 'fr' ? 'Ajoutez au moins un article' : 'أضف قطعة واحدة على الأقل', 'error');
+    btn.disabled = false;
+    btn.innerHTML = `<span data-fr="Enregistrer le Dépôt" data-ar="حفظ الإيداع">${lang === 'fr' ? 'Enregistrer le Dépôt' : 'حفظ الإيداع'}</span>`;
+    return;
   }
+
+  fd.set('items', JSON.stringify(items));
+  fd.set('is_high_value', String(items[0].is_high_value || 0));
+  fd.set('price_overridden', String(items[0].price_overridden || 0));
+  fd.set('final_price', String(items[0].final_price || 0));
+
   try {
     const r = await fetch('/api/orders', { method: 'POST', body: fd });
     const d = await r.json();
     if (d.success) {
-      // Enregistrer les articles supplémentaires avec leur prix correct
-      const extras = document.querySelectorAll('[id^="extraArticle_"]');
-      const extraResults = [];
-
-      for (const el of extras) {
-        const idx = el.id.split('_')[1];
-        const artType = document.getElementById(`extraArticleSelect_${idx}`)?.value;
-        const svcType = document.getElementById(`extraServiceSelect_${idx}`)?.value;
-        const notes = el.querySelector(`[name="extra_notes_${idx}"]`)?.value || '';
-        if (artType && svcType) {
-          // Calcul du prix correct depuis le catalogue
-          const extraPrice = getPrice(artType, svcType) || 0;
-          const extraFd = new FormData();
-          extraFd.append('customer_name', fd.get('customer_name'));
-          extraFd.append('customer_phone', fd.get('customer_phone'));
-          extraFd.append('article_type', artType);
-          extraFd.append('service_type', svcType);
-          extraFd.append('deposit_date', fd.get('deposit_date'));
-          extraFd.append('expected_pickup_date', fd.get('expected_pickup_date'));
-          extraFd.append('is_high_value', '0');
-          extraFd.append('price_overridden', '0');
-          extraFd.append('final_price', extraPrice.toString());
-          extraFd.append('notes', notes);
-          const resp = await fetch('/api/orders', { method: 'POST', body: extraFd });
-          const extraData = await resp.json();
-          if (extraData.success) extraResults.push(extraData.order);
-        }
-      }
-
-      // Afficher un reçu combiné avec TOUS les articles et le total
-      showMultiReceiptModal(d.order, extraResults, d.whatsapp_msg);
+      showReceiptModal(d.order, d.whatsapp_msg);
 
       e.target.reset();
       setDates();
@@ -261,16 +276,20 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
       document.getElementById('photoText').style.display = 'block';
       document.getElementById('priceDisplay').style.display = 'none';
       document.getElementById('manualPriceGroup').style.display = 'none';
-      // Réinitialiser les articles supplémentaires
       document.getElementById('extraArticlesContainer').innerHTML = '';
       extraArticleCount = 0;
       const totalDisplay = document.getElementById('orderTotalDisplay');
       if (totalDisplay) totalDisplay.style.display = 'none';
-      const totalArticles = 1 + extraResults.length;
-      showToast(lang === 'fr' ? `✅ ${totalArticles} article(s) enregistré(s) !` : `✅ تم تسجيل ${totalArticles} قطعة !`, 'success');
-    } else { showToast('Erreur: ' + (d.error || ''), 'error'); }
-  } catch(ex) { showToast('Erreur réseau', 'error'); }
-  finally {
+      const totalArticles = d.order?.items_count || items.length;
+      showToast(lang === 'fr' ? `✅ 1 commande créée avec ${totalArticles} article(s) !` : `✅ تم إنشاء طلب واحد مع ${totalArticles} قطعة !`, 'success');
+      loadOrders();
+      loadDashboard();
+    } else {
+      showToast('Erreur: ' + (d.error || ''), 'error');
+    }
+  } catch(ex) {
+    showToast('Erreur réseau', 'error');
+  } finally {
     btn.disabled = false;
     btn.innerHTML = `<span data-fr="Enregistrer le Dépôt" data-ar="حفظ الإيداع">${lang === 'fr' ? 'Enregistrer le Dépôt' : 'حفظ الإيداع'}</span>`;
   }
@@ -404,16 +423,45 @@ function removeExtraArticle(idx) {
 }
 
 /* ════ RECEIPT MODAL ════ */
+function getOrderItems(order) {
+  if (Array.isArray(order?.items) && order.items.length) return order.items;
+  return [{
+    id: null,
+    article_type: order.article_type,
+    service_type: order.service_type,
+    article_fr: order.article_fr,
+    article_ar: order.article_ar,
+    service_fr: order.service_fr,
+    service_ar: order.service_ar,
+    final_price: order.final_price,
+    status: order.status || order.global_status || 'received',
+  }];
+}
+
 function showReceiptModal(order, waMsg) {
-  const art = CATALOG[order.article_type] || {};
-  const artL = art[lang === 'fr' ? 'fr' : 'ar'] || order.article_type;
-  const svcL = SERVICES[order.service_type]?.[lang === 'fr' ? 'fr' : 'ar'] || order.service_type;
+  const items = getOrderItems(order);
+  const total = parseFloat(order.total_price ?? items.reduce((s, it) => s + parseFloat(it.final_price || 0), 0));
   const phone = order.customer_phone?.replace(/\D/g,'') || '';
   const waLink = `https://wa.me/${phone.startsWith('0') ? '212' + phone.slice(1) : phone}?text=${encodeURIComponent(waMsg || '')}`;
+  const itemRows = items.map((it, i) => {
+    const art = CATALOG[it.article_type] || {};
+    const articleLabel = it.article_fr || art[lang === 'fr' ? 'fr' : 'ar'] || it.article_type || '';
+    const serviceLabel = it.service_fr || SERVICES[it.service_type]?.[lang === 'fr' ? 'fr' : 'ar'] || it.service_type || '';
+    return `
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--primary)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+          <div>
+            <div style="font-weight:700;font-size:.9rem;color:var(--navy)">${i + 1}. ${articleLabel}</div>
+            <div style="font-size:.8rem;color:var(--text-mid)">${serviceLabel}</div>
+            ${it.notes ? `<div style="font-size:.76rem;color:var(--text-light);margin-top:2px">${it.notes}</div>` : ''}
+          </div>
+          <div style="font-weight:800;color:var(--primary);font-size:1rem;white-space:nowrap">${parseFloat(it.final_price || 0).toFixed(2)} MAD</div>
+        </div>
+      </div>`;
+  }).join('');
 
   const html = `
     <div>
-      <!-- Zone imprimable UNIQUEMENT -->
       <div class="receipt" id="printZone">
         <div class="receipt-header">
           <div class="receipt-logo-wrap"><img src="/static/images/logo.png" alt="Logo"/></div>
@@ -425,14 +473,15 @@ function showReceiptModal(order, waMsg) {
         </div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Client':'الزبون'}</span><span class="receipt-val">${order.customer_name}</span></div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Téléphone':'رقم الهاتف'}</span><span class="receipt-val">${order.customer_phone}</span></div>
-        <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Article':'القطعة'}</span><span class="receipt-val">${artL}</span></div>
-        <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Type de service':'نوع الخدمة'}</span><span class="receipt-val">${svcL}</span></div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Date de dépôt':'تاريخ الاستلام'}</span><span class="receipt-val">${order.deposit_date}</span></div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Date de retrait':'تاريخ التسليم'}</span><span class="receipt-val">${order.expected_pickup_date}</span></div>
-        <div class="receipt-total"><div style="font-size:.8rem;opacity:.7">${lang==='fr'?'MONTANT TOTAL':'المبلغ الإجمالي'}</div><div class="receipt-total-amt">${parseFloat(order.final_price||0).toFixed(2)} MAD</div></div>
+        <div style="margin:14px 0 8px;font-weight:700;font-size:.85rem;color:var(--navy);text-transform:uppercase">
+          ${lang === 'fr' ? `${items.length} article(s)` : `${items.length} قطع`}
+        </div>
+        ${itemRows}
+        <div class="receipt-total"><div style="font-size:.8rem;opacity:.7">${lang==='fr'?'MONTANT TOTAL':'المبلغ الإجمالي'}</div><div class="receipt-total-amt">${total.toFixed(2)} MAD</div></div>
       </div>
 
-      <!-- Zone WhatsApp — exclue de l'impression -->
       <div class="no-print">
         ${waMsg ? `<div class="whatsapp-cta" style="margin-top:14px">
           <p>💬 ${lang==='fr'?'Message prêt à envoyer au client :':'الرسالة جاهزة للإرسال :'}</p>
@@ -451,106 +500,8 @@ function showReceiptModal(order, waMsg) {
   openModal(html);
 }
 
-
-/* ════ REÇU MULTI-ARTICLES ════ */
-/**
- * Affiche un reçu combiné pour plusieurs articles du même client.
- * Calcule le total général de tous les articles.
- * - mainOrder : la commande principale
- * - extraOrders : tableau des commandes supplémentaires
- * - waMsg : message WhatsApp de la commande principale
- */
-function showMultiReceiptModal(mainOrder, extraOrders, waMsg) {
-  // Si pas d'articles supplémentaires, afficher le reçu simple
-  if (!extraOrders || extraOrders.length === 0) {
-    showReceiptModal(mainOrder, waMsg);
-    return;
-  }
-
-  // Regrouper tous les articles (principal + supplémentaires)
-  const allOrders = [mainOrder, ...extraOrders];
-
-  // Calcul du total général
-  const total = allOrders.reduce((sum, o) => sum + parseFloat(o.final_price || 0), 0);
-
-  // Construire les lignes du reçu pour chaque article
-  const articleRows = allOrders.map((o, i) => {
-    const art = CATALOG[o.article_type] || {};
-    const artL = o.article_fr || art[lang === 'fr' ? 'fr' : 'ar'] || o.article_type;
-    const svcL = o.service_fr || SERVICES[o.service_type]?.[lang === 'fr' ? 'fr' : 'ar'] || '';
-    return `
-      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--primary)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div style="font-weight:700;font-size:.9rem;color:var(--navy)">${i + 1}. ${artL}</div>
-            <div style="font-size:.8rem;color:var(--text-mid)">${svcL} · Code: <b>${o.pickup_code}</b></div>
-          </div>
-          <div style="font-weight:800;color:var(--primary);font-size:1rem">${parseFloat(o.final_price || 0).toFixed(2)} MAD</div>
-        </div>
-      </div>`;
-  }).join('');
-
-  // Préparer le lien WhatsApp avec le total
-  const phone = mainOrder.customer_phone?.replace(/\D/g, '') || '';
-  const waPhone = phone.startsWith('0') ? '212' + phone.slice(1) : phone;
-  const waLink = `https://wa.me/${waPhone}?text=${encodeURIComponent(waMsg || '')}`;
-
-  const html = `
-    <div>
-      <div class="receipt" id="printZone">
-        <div class="receipt-header">
-          <div class="receipt-logo-wrap"><img src="/static/images/logo.png" alt="Logo"/></div>
-          <div class="receipt-company">Univers Pressing</div>
-          <div class="receipt-company-ar">عالم التصبين</div>
-          <div class="receipt-order">${lang === 'fr' ? 'Dépôt multiple' : 'إيداع متعدد'}</div>
-        </div>
-        <div class="receipt-row">
-          <span class="receipt-label">${lang === 'fr' ? 'Client' : 'الزبون'}</span>
-          <span class="receipt-val">${mainOrder.customer_name}</span>
-        </div>
-        <div class="receipt-row">
-          <span class="receipt-label">${lang === 'fr' ? 'Téléphone' : 'رقم الهاتف'}</span>
-          <span class="receipt-val">${mainOrder.customer_phone}</span>
-        </div>
-        <div class="receipt-row">
-          <span class="receipt-label">${lang === 'fr' ? 'Date dépôt' : 'تاريخ الإيداع'}</span>
-          <span class="receipt-val">${mainOrder.deposit_date}</span>
-        </div>
-        <div class="receipt-row">
-          <span class="receipt-label">${lang === 'fr' ? 'Retrait prévu' : 'الاستلام المتوقع'}</span>
-          <span class="receipt-val">${mainOrder.expected_pickup_date}</span>
-        </div>
-
-        <!-- Liste des articles avec prix individuels -->
-        <div style="margin:14px 0 8px;font-weight:700;font-size:.85rem;color:var(--navy);text-transform:uppercase;letter-spacing:.05em">
-          ${lang === 'fr' ? `${allOrders.length} Articles` : `${allOrders.length} قطع`}
-        </div>
-        ${articleRows}
-
-        <!-- Total général -->
-        <div class="receipt-total">
-          <div style="font-size:.8rem;opacity:.7">${lang === 'fr' ? 'TOTAL GÉNÉRAL' : 'المجموع الكلي'}</div>
-          <div class="receipt-total-amt">${total.toFixed(2)} MAD</div>
-        </div>
-      </div>
-
-      <!-- Boutons WhatsApp et actions -->
-      <div class="no-print">
-        ${waMsg ? `<div class="whatsapp-cta" style="margin-top:14px">
-          <p>💬 ${lang === 'fr' ? 'Message prêt à envoyer au client :' : 'الرسالة جاهزة للإرسال :'}</p>
-          <div class="whatsapp-msg">${waMsg}</div>
-          <div class="whatsapp-btns">
-            <button class="btn btn-success" onclick="window.open('${waLink}','_blank')">📱 WhatsApp</button>
-            <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(${JSON.stringify(waMsg)});showToast('${lang === 'fr' ? 'Copié !' : 'تم النسخ !'}','success')">📋 ${lang === 'fr' ? 'Copier' : 'نسخ'}</button>
-          </div>
-        </div>` : ''}
-        <div style="display:flex;gap:10px;margin-top:14px">
-          <button class="btn btn-primary btn-full" onclick="printReceipt()">🖨️ ${lang === 'fr' ? 'Imprimer' : 'طباعة'}</button>
-          <button class="btn btn-ghost btn-full" onclick="closeModal()">${lang === 'fr' ? 'Fermer' : 'إغلاق'}</button>
-        </div>
-      </div>
-    </div>`;
-  openModal(html);
+function showMultiReceiptModal(mainOrder, _extraOrders, waMsg) {
+  showReceiptModal(mainOrder, waMsg);
 }
 
 function printReceipt() {
@@ -592,7 +543,7 @@ async function loadDashboard() {
     document.getElementById('stat-ready').textContent     = rdy.length;
     document.getElementById('stat-completed').textContent = comp.length;
     const now = new Date(), ms = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const rev = comp.filter(o=>o.actual_pickup_date?.startsWith(ms)).reduce((s,o)=>s+parseFloat(o.final_price||0),0);
+    const rev = comp.filter(o=>o.actual_pickup_date?.startsWith(ms)).reduce((s,o)=>s+parseFloat(o.total_price||o.final_price||0),0);
     document.getElementById('stat-revenue').textContent = rev.toFixed(0);
     const recent = [...rec,...rdy].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,8);
     const el = document.getElementById('recentList');
@@ -616,7 +567,7 @@ async function loadOrders() {
 
 function renderOrders() {
   const el = document.getElementById('ordersList');
-  let list = currentFilter === 'all' ? allOrders : allOrders.filter(o=>o.status===currentFilter);
+  let list = currentFilter === 'all' ? allOrders : allOrders.filter(o=>(o.global_status || o.status)===currentFilter);
   el.innerHTML = list.length ? list.map(o=>orderCardHTML(o,false)).join('') :
     `<div class="empty-state"><div class="empty-state-icon">📋</div><h3>${lang==='fr'?'Aucune commande':'لا توجد طلبات'}</h3></div>`;
 }
@@ -631,7 +582,7 @@ function filterOrders(f, btn) {
 async function searchOrders(q) {
   if (!q.trim()) { renderOrders(); return; }
   const data = await fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r=>r.json());
-  document.getElementById('ordersList').innerHTML = data.filter(o=>o.status!=='completed').map(o=>orderCardHTML(o,false)).join('');
+  document.getElementById('ordersList').innerHTML = data.filter(o=>(o.global_status || o.status)!=='completed').map(o=>orderCardHTML(o,false)).join('');
 }
 
 async function loadHistory() {
@@ -642,26 +593,34 @@ async function loadHistory() {
 }
 
 function orderCardHTML(o, compact) {
-  const art = CATALOG[o.article_type] || {};
-  const artL = o.article_fr || art[lang==='fr'?'fr':'ar'] || o.article_type;
-  const svcL = o.service_fr || SERVICES[o.service_type]?.[lang==='fr'?'fr':'ar'] || '';
+  const items = getOrderItems(o);
+  const first = items[0] || {};
+  const art = CATALOG[first.article_type || o.article_type] || {};
+  const artL = first.article_fr || o.article_fr || art[lang==='fr'?'fr':'ar'] || first.article_type || o.article_type || '';
+  const svcL = first.service_fr || o.service_fr || SERVICES[first.service_type || o.service_type]?.[lang==='fr'?'fr':'ar'] || '';
+  const itemsCount = parseInt(o.items_count || items.length || 1, 10);
+  const status = o.global_status || o.status || 'received';
   const badges = { received:{lbl:lang==='fr'?'Reçu':'مستلم',cls:'badge-received'}, ready:{lbl:lang==='fr'?'Prêt':'جاهز',cls:'badge-ready'}, completed:{lbl:lang==='fr'?'Terminé':'مكتمل',cls:'badge-completed'} };
-  const st = badges[o.status] || badges.received;
-  const hvTag = o.is_high_value ? `<span style="background:var(--accent-light);color:#92400E;padding:2px 7px;border-radius:10px;font-size:.7rem;font-weight:700;margin-left:6px">⭐ ${lang==='fr'?'Haute valeur':'قيمة عالية'}</span>` : '';
-  const readyBtn = !compact && o.status==='received' ? `<button class="btn btn-success" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();markReady(${o.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>` : '';
-  // Bouton supprimer visible pour tous les rôles (gérant ET employé)
+  const st = badges[status] || badges.received;
+  const hasHighValue = items.some(it => parseInt(it.is_high_value || 0, 10) === 1) || parseInt(o.is_high_value || 0, 10) === 1;
+  const hvTag = hasHighValue ? `<span style="background:var(--accent-light);color:#92400E;padding:2px 7px;border-radius:10px;font-size:.7rem;font-weight:700;margin-left:6px">⭐ ${lang==='fr'?'Haute valeur':'قيمة عالية'}</span>` : '';
+  const articleSummary = itemsCount > 1
+    ? `${itemsCount} ${lang==='fr'?'articles':'قطع'} — ${artL}${itemsCount > 1 ? ' +' + (itemsCount - 1) : ''}`
+    : `${artL} — ${svcL}`;
+  const readyBtn = !compact && status==='received' ? `<button class="btn btn-success" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();markReady(${o.id})">✅ ${lang==='fr'?'Tout prêt':'الكل جاهز'}</button>` : '';
   const deleteBtn = !compact ? `<button class="btn btn-danger" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();deleteOrder(${o.id})">🗑️ ${lang==='fr'?'Supprimer':'حذف'}</button>` : '';
+  const total = parseFloat(o.total_price || o.final_price || 0);
 
-  return `<div class="order-card s-${o.status}" onclick="openDetail(${o.id})">
+  return `<div class="order-card s-${status}" onclick="openDetail(${o.id})">
     <div class="order-main">
       <div class="order-number">${o.order_number} · ${o.pickup_code}</div>
       <div class="order-customer">${o.customer_name}${hvTag}</div>
-      <div class="order-detail">${artL} — ${svcL}</div>
+      <div class="order-detail">${articleSummary}</div>
       <div class="order-phone">📞 ${o.customer_phone}</div>
       <div style="margin-top:7px"><span class="badge ${st.cls}">${st.lbl}</span></div>
     </div>
     <div class="order-meta">
-      <div class="order-price">${parseFloat(o.final_price||0).toFixed(2)}</div>
+      <div class="order-price">${total.toFixed(2)}</div>
       <div class="order-price-unit">MAD</div>
       <div class="order-date">📅 ${o.expected_pickup_date}</div>
     </div>
@@ -701,102 +660,72 @@ function showWAPrompt(order, waMsg) {
 async function openDetail(id) {
   openModal('<div class="loading-spinner"><div class="spinner"></div></div>');
   const o = await fetch(`/api/orders/${id}`).then(r=>r.json());
-
-  // Chercher les commandes du même client déposées le même jour (articles groupés)
-  let groupOrders = [];
-  try {
-    const allRec = await fetch(`/api/orders?status=received`).then(r=>r.json());
-    const allRdy = await fetch(`/api/orders?status=ready`).then(r=>r.json());
-    const allComp = await fetch(`/api/orders?status=completed`).then(r=>r.json());
-    const allFetched = [...allRec, ...allRdy, ...allComp];
-    groupOrders = allFetched.filter(x =>
-      x.customer_phone === o.customer_phone &&
-      x.deposit_date === o.deposit_date &&
-      x.id !== o.id
-    );
-  } catch(e) {}
-
-  const isGrouped = groupOrders.length > 0;
-  const allGroupOrders = isGrouped ? [o, ...groupOrders].sort((a,b)=>a.id-b.id) : [o];
-
-  const art = CATALOG[o.article_type]||{};
-  const artFR = o.article_fr||art.fr||o.article_type;
-  const artAR = o.article_ar||art.ar||'';
-  const svcFR = o.service_fr||SERVICES[o.service_type]?.fr||'';
+  const items = getOrderItems(o);
+  const status = o.global_status || o.status || 'received';
   const statusLabel = {received:lang==='fr'?'Reçu':'مستلم',ready:lang==='fr'?'Prêt':'جاهز',completed:lang==='fr'?'Terminé':'مكتمل'};
   const badges = {received:'badge-received',ready:'badge-ready',completed:'badge-completed'};
   const hist = (o.history||[]).map(h=>`<li class="history-item"><div class="history-dot"></div><div><div style="font-weight:600;color:var(--text)">${h.action} — ${h.details||''}</div><div style="font-size:.78rem;color:var(--text-light)">${h.timestamp}</div></div></li>`).join('');
-
-  // Si commande groupée : afficher tous les articles avec leur statut individuel
-  let groupedArticlesHTML = '';
-  if (isGrouped) {
-    const totalGroup = allGroupOrders.reduce((s,x)=>s+parseFloat(x.final_price||0),0);
-    const allReady = allGroupOrders.every(x=>x.status!=='received');
-    const groupRows = allGroupOrders.map((x,i)=>{
-      const xArt = CATALOG[x.article_type]||{};
-      const xArtL = x.article_fr||xArt[lang==='fr'?'fr':'ar']||x.article_type;
-      const xSvcL = x.service_fr||SERVICES[x.service_type]?.[lang==='fr'?'fr':'ar']||'';
-      const xBadge = badges[x.status]||'badge-received';
-      const xLabel = statusLabel[x.status]||'';
-      const xReadyBtn = x.status==='received'
-        ? `<button class="btn btn-success" style="padding:5px 10px;font-size:.78rem;margin-top:6px" onclick="markArticleReady(${x.id},${o.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>`
-        : `<span style="font-size:.78rem;color:var(--success,#22c55e);font-weight:700">✅ ${xLabel}</span>`;
-      return `<div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--primary)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
-          <div>
-            <div style="font-weight:700;font-size:.9rem;color:var(--navy)">${i+1}. ${xArtL}</div>
-            <div style="font-size:.8rem;color:var(--text-mid)">${xSvcL} · <span class="badge ${xBadge}" style="font-size:.72rem">${xLabel}</span></div>
-            <div style="font-size:.78rem;color:var(--text-light);margin-top:2px">Code: <b>${x.pickup_code}</b></div>
-            ${xReadyBtn}
-          </div>
-          <div style="font-weight:800;color:var(--primary);font-size:1rem">${parseFloat(x.final_price||0).toFixed(2)} MAD</div>
+  const total = parseFloat(o.total_price || o.final_price || 0);
+  const itemsHTML = items.map((it, i) => {
+    const art = CATALOG[it.article_type] || {};
+    const itemStatus = it.status || status;
+    const itemLabel = statusLabel[itemStatus] || statusLabel.received;
+    const itemBadge = badges[itemStatus] || badges.received;
+    const articleLabel = it.article_fr || art[lang==='fr'?'fr':'ar'] || it.article_type || '';
+    const serviceLabel = it.service_fr || SERVICES[it.service_type]?.[lang==='fr'?'fr':'ar'] || it.service_type || '';
+    const readyBtn = status !== 'completed' && itemStatus === 'received' && it.id
+      ? `<button class="btn btn-success" style="padding:5px 10px;font-size:.78rem;margin-top:6px" onclick="markArticleReady(${o.id},${it.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>`
+      : `<span style="font-size:.78rem;color:var(--success,#22c55e);font-weight:700">${itemLabel}</span>`;
+    return `<div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--primary)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
+        <div>
+          <div style="font-weight:700;font-size:.9rem;color:var(--navy)">${i+1}. ${articleLabel}</div>
+          <div style="font-size:.8rem;color:var(--text-mid)">${serviceLabel} · <span class="badge ${itemBadge}" style="font-size:.72rem">${itemLabel}</span></div>
+          ${it.notes ? `<div style="font-size:.78rem;color:var(--text-light);margin-top:2px">${it.notes}</div>` : ''}
+          ${readyBtn}
         </div>
-      </div>`;
-    }).join('');
+        <div style="font-weight:800;color:var(--primary);font-size:1rem">${parseFloat(it.final_price||0).toFixed(2)} MAD</div>
+      </div>
+    </div>`;
+  }).join('');
 
-    groupedArticlesHTML = `
-      <div style="margin:14px 0">
-        <div style="font-weight:700;font-size:.9rem;color:var(--navy);margin-bottom:8px">
-          📦 ${lang==='fr'?`${allGroupOrders.length} articles dans ce dépôt`:`${allGroupOrders.length} قطع في هذا الإيداع`}
-        </div>
-        ${groupRows}
-        <div style="background:var(--navy,#0F172A);color:#fff;border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;margin-top:8px">
-          <span style="font-weight:700;font-size:.88rem">${lang==='fr'?'TOTAL COMMANDE':'مجموع الطلب'}</span>
-          <span style="font-size:1.2rem;font-weight:800">${totalGroup.toFixed(2)} MAD</span>
-        </div>
-        ${!allReady ? `<div style="font-size:.8rem;color:var(--text-mid);margin-top:8px;font-style:italic">ℹ️ ${lang==='fr'?'La commande sera marquée prête quand tous les articles seront prêts.':'يُعلَّم الطلب جاهزًا عند جهوز جميع القطع.'}</div>` : ''}
-      </div>`;
-  }
+  const itemsBlock = `
+    <div style="margin:14px 0">
+      <div style="font-weight:700;font-size:.9rem;color:var(--navy);margin-bottom:8px">
+        📦 ${lang==='fr'?`${items.length} article(s) dans cette commande`:`${items.length} قطع في هذا الطلب`}
+      </div>
+      ${itemsHTML}
+      <div style="background:var(--navy,#0F172A);color:#fff;border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+        <span style="font-weight:700;font-size:.88rem">${lang==='fr'?'TOTAL COMMANDE':'مجموع الطلب'}</span>
+        <span style="font-size:1.2rem;font-weight:800">${total.toFixed(2)} MAD</span>
+      </div>
+      ${status === 'received' && items.length > 1 ? `<div style="font-size:.8rem;color:var(--text-mid);margin-top:8px;font-style:italic">ℹ️ ${lang==='fr'?'La commande sera marquée prête quand tous les articles seront prêts.':'يُعلَّم الطلب جاهزًا عند جهوز جميع القطع.'}</div>` : ''}
+    </div>`;
 
+  const receiptOrder = JSON.stringify(o).replace(/"/g,'&quot;');
   const html = `
     <div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
         <h2 style="font-weight:800;font-size:1.3rem;color:var(--navy)">${o.order_number}</h2>
-        <span class="badge ${badges[o.status]||'badge-received'}">${statusLabel[o.status]||''}</span>
-        ${o.is_high_value?`<span style="background:var(--accent-light);color:#92400E;padding:3px 10px;border-radius:10px;font-size:.75rem;font-weight:700">⭐ Haute valeur</span>`:''}
-        ${isGrouped?`<span style="background:#DBEAFE;color:#1D4ED8;padding:3px 10px;border-radius:10px;font-size:.75rem;font-weight:700">📦 ${lang==='fr'?'Dépôt groupé':'إيداع متعدد'}</span>`:''}
+        <span class="badge ${badges[status]||'badge-received'}">${statusLabel[status]||''}</span>
+        ${items.length > 1 ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:3px 10px;border-radius:10px;font-size:.75rem;font-weight:700">📦 ${lang==='fr'?'Commande groupée':'طلب متعدد'}</span>` : ''}
       </div>
       <div class="detail-grid">
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Client':'الزبون'}</div><div class="detail-item-value">${o.customer_name}</div></div>
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Téléphone':'رقم الهاتف'}</div><div class="detail-item-value">${o.customer_phone}</div></div>
-        ${!isGrouped?`
-        <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Article':'القطعة'}</div><div class="detail-item-value">${artFR} / ${artAR}</div></div>
-        <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Type de service':'نوع الخدمة'}</div><div class="detail-item-value">${svcFR}</div></div>
-        <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Prix':'السعر'}</div><div class="detail-item-value" style="font-size:1.1rem;color:var(--primary);font-weight:800">${parseFloat(o.final_price||0).toFixed(2)} MAD</div></div>
-        `:''}
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Code retrait':'رمز الاستلام'}</div><div class="detail-item-value" style="font-size:1.1rem;color:var(--primary);font-weight:800;letter-spacing:.12em">${o.pickup_code}</div></div>
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Date de dépôt':'تاريخ الاستلام'}</div><div class="detail-item-value">${o.deposit_date}</div></div>
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Date de retrait':'تاريخ التسليم'}</div><div class="detail-item-value">${o.expected_pickup_date}</div></div>
         ${o.authorized_person_name?`<div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Personne autorisée':'الشخص المفوّض'}</div><div class="detail-item-value">${o.authorized_person_name} (${o.authorized_person_relation||'—'})</div></div>`:''}
       </div>
-      ${groupedArticlesHTML}
+      ${itemsBlock}
       ${o.article_photo?`<img src="/static/uploads/${o.article_photo}" style="max-width:100%;border-radius:var(--radius);margin:12px 0;box-shadow:var(--shadow)" alt="photo"/>`:''}
       ${o.notes?`<div style="background:var(--bg);border-radius:var(--radius-sm);padding:12px 14px;font-size:.9rem;color:var(--text-mid);margin:8px 0">${o.notes}</div>`:''}
       ${hist?`<div style="margin-top:16px"><div style="font-weight:700;font-size:.9rem;color:var(--navy);margin-bottom:8px">Historique</div><ul class="history-timeline">${hist}</ul></div>`:''}
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
-        ${!isGrouped && o.status==='received'?`<button class="btn btn-success" onclick="closeModal();markReady(${o.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>`:''}
-        <button class="btn btn-primary" onclick="showReceiptModal(${JSON.stringify(o).replace(/"/g,'&quot;')})">🧾 ${lang==='fr'?'Reçu':'إيصال'}</button>
-        ${o.status!=='completed'?`<button class="btn btn-warning" onclick="openEditModal(${o.id})">✏️ ${lang==='fr'?'Modifier':'تعديل'}</button>`:''}
+        ${status==='received'?`<button class="btn btn-success" onclick="closeModal();markReady(${o.id})">✅ ${lang==='fr'?'Marquer toute la commande prête':'تعيين الطلب كله جاهز'}</button>`:''}
+        <button class="btn btn-primary" onclick="showReceiptModal(${receiptOrder})">🧾 ${lang==='fr'?'Reçu':'إيصال'}</button>
+        ${status!=='completed'?`<button class="btn btn-warning" onclick="openEditModal(${o.id})">✏️ ${lang==='fr'?'Modifier':'تعديل'}</button>`:''}
         <button class="btn btn-danger" onclick="deleteOrder(${o.id})">🗑️ ${lang==='fr'?'Supprimer':'حذف'}</button>
         <button class="btn btn-ghost" onclick="closeModal()">${lang==='fr'?'Fermer':'إغلاق'}</button>
       </div>
@@ -805,18 +734,19 @@ async function openDetail(id) {
 }
 
 /**
- * Marque un article individuel comme prêt.
- * Si tous les articles du groupe sont prêts, la commande principale aussi.
+ * Marque un article individuel comme prêt dans une commande multi-articles.
  */
-async function markArticleReady(articleId, mainOrderId) {
+async function markArticleReady(orderId, itemId) {
   if (!confirm(lang==='fr'?'Marquer cet article comme prêt ?':'تعيين هذه القطعة كجاهزة؟')) return;
-  const r = await fetch(`/api/orders/${articleId}/status`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'ready'})});
+  const r = await fetch(`/api/orders/${orderId}/items/${itemId}/ready`, { method:'PUT' });
   const d = await r.json();
   if (d.success) {
     showToast(lang==='fr'?'✅ Article marqué prêt !':'✅ تم تعيين القطعة كجاهزة !','success');
+    if (d.whatsapp_msg) showWAPrompt(d.order, d.whatsapp_msg);
     loadOrders(); loadDashboard();
-    // Ré-ouvrir le détail pour rafraîchir
-    openDetail(mainOrderId);
+    openDetail(orderId);
+  } else {
+    showToast('Erreur: ' + (d.error || ''), 'error');
   }
 }
 
