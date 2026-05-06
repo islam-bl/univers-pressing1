@@ -265,7 +265,7 @@ def api_employees_create():
     if err:
         return err
     data = request.get_json() or {}
-    username = (data.get('username') or '').strip()
+    username = (data.get('username') or '').strip().lower()
     password = (data.get('password') or '').strip()
     full_name = (data.get('full_name') or '').strip()
     if not username or not password or not full_name:
@@ -274,10 +274,10 @@ def api_employees_create():
         return jsonify({'success': False, 'error': 'Mot de passe trop court (4 min)'}), 400
     if User.username_exists(username):
         return jsonify({'success': False, 'error': "Ce nom d'utilisateur existe déjà"}), 400
-    ok = User.create(username, password, full_name, role='employe', manager_id=session.get('user_id'))
+    ok, err = User.create(username, password, full_name, role='employe', manager_id=session.get('user_id'))
     if not ok:
-        return jsonify({'success': False, 'error': 'Erreur création'}), 500
-    return jsonify({'success': True})
+        return jsonify({'success': False, 'error': err or 'Erreur création employé'}), 500
+    return jsonify({'success': True, 'username': username})
 
 
 @orders_bp.route('/api/employees/<int:uid>', methods=['DELETE'])

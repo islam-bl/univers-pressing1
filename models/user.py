@@ -30,6 +30,10 @@ class User:
     def create(username, password, full_name, role='gerant', manager_id=None):
         if role not in ROLES:
             role = 'employe'
+        username = (username or '').strip().lower()
+        full_name = (full_name or '').strip()
+        if not username or not password or not full_name:
+            return False, "Champs obligatoires manquants"
         conn = get_db()
         try:
             sql = (f'INSERT INTO users (username, password_hash, full_name, role, manager_id) '
@@ -43,16 +47,17 @@ class User:
             else:
                 conn.execute(sql, params)
                 conn.commit()
-            return True
+            return True, None
         except Exception as e:
             print("User.create error:", e)
-            return False
+            return False, str(e)
         finally:
             conn.close()
 
     # ── AUTH ─────────────────────────────────────────────────
     @staticmethod
     def authenticate(username, password):
+        username = (username or '').strip().lower()
         conn = get_db()
         sql = f'SELECT * FROM users WHERE username={PH} AND password_hash={PH}'
         params = (username, User.hash_password(password))
@@ -86,6 +91,7 @@ class User:
 
     @staticmethod
     def username_exists(username):
+        username = (username or '').strip().lower()
         conn = get_db()
         sql = f'SELECT id FROM users WHERE username={PH}'
         if DATABASE_URL:

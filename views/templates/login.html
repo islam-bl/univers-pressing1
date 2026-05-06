@@ -228,21 +228,10 @@ body::after{
           <input type="password" id="reg_password" placeholder="••••••••"/>
         </div>
       </div>
-      <div class="form-group">
-        <label>Rôle / الدور</label>
-        <div style="display:flex;gap:10px;margin-top:4px">
-          <label style="flex:1;display:flex;align-items:center;gap:8px;padding:12px 14px;border:2px solid var(--border);border-radius:10px;cursor:pointer;font-weight:600;font-size:.9rem;color:var(--text);background:var(--bg);text-transform:none;letter-spacing:normal">
-            <input type="radio" name="reg_role" id="role_gerant" value="gerant" style="accent-color:var(--primary);width:18px;height:18px"/>
-            🧑‍💼 Gérant / مسؤول
-          </label>
-          <label style="flex:1;display:flex;align-items:center;gap:8px;padding:12px 14px;border:2px solid var(--border);border-radius:10px;cursor:pointer;font-weight:600;font-size:.9rem;color:var(--text);background:var(--bg);text-transform:none;letter-spacing:normal">
-            <input type="radio" name="reg_role" id="role_employe" value="employe" checked style="accent-color:var(--primary);width:18px;height:18px"/>
-            👷 Employé / موظف
-          </label>
-        </div>
-        <p style="font-size:.8rem;color:var(--muted);margin-top:6px">Le gérant accède au tableau de bord et aux statistiques financières.</p>
+      <div style="background:#EDE9FE;border:1px solid #DDD6FE;border-radius:10px;padding:10px 12px;font-size:.82rem;color:#5429D6;margin-bottom:6px">
+        ℹ️ L'inscription crée un compte <b>Gérant</b>. Les comptes employés sont créés ensuite par le gérant depuis la page « Employés ».
       </div>
-      <button class="btn-submit" id="registerBtn" onclick="doRegister()">Créer mon compte</button>
+      <button class="btn-submit" id="registerBtn" onclick="doRegister()">Créer mon compte gérant</button>
     </div>
   </div>
 
@@ -296,8 +285,7 @@ async function doRegister() {
   const full_name = document.getElementById('reg_fullname').value.trim();
   const username  = document.getElementById('reg_username').value.trim();
   const password  = document.getElementById('reg_password').value;
-  const roleEl    = document.querySelector('input[name="reg_role"]:checked');
-  const role      = roleEl ? roleEl.value : 'employe';
+  const role      = 'gerant';
   if (!full_name || !username || !password) { showAlert('Remplissez tous les champs'); return; }
   btn.disabled = true; btn.textContent = 'Création...';
   try {
@@ -307,7 +295,7 @@ async function doRegister() {
     });
     const d = await r.json();
     if (d.success) {
-      showAlert('Compte créé ! Connectez-vous maintenant.', 'success');
+      showAlert('Compte gérant créé ! Connectez-vous maintenant.', 'success');
       setTimeout(() => switchTab('login'), 1200);
     } else {
       showAlert(d.error || 'Erreur lors de la création');
@@ -315,7 +303,7 @@ async function doRegister() {
   } catch(e) {
     showAlert('Erreur réseau');
   } finally {
-    btn.disabled = false; btn.textContent = 'Créer mon compte';
+    btn.disabled = false; btn.textContent = 'Créer mon compte gérant';
   }
 }
 

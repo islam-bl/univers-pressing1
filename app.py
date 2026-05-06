@@ -31,6 +31,15 @@ def create_app():
 
 app = create_app()
 
+# Important : init_db() doit être appelé au chargement du module pour que
+# Gunicorn (Railway / Procfile : "web: gunicorn app:app") crée les tables
+# manquantes (order_items) et applique les migrations légères (manager_id,
+# global_status, total_price, ...).
+try:
+    init_db()
+except Exception as _e:
+    print("init_db() au démarrage a échoué :", _e)
+
 if __name__ == '__main__':
     init_db()
     port = int(os.environ.get('PORT', 5000))

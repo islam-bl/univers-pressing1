@@ -366,6 +366,24 @@ class Order:
                     'service_fr': s.get('fr', it.get('service_type', '')),
                     'service_ar': s.get('ar', ''),
                 })
+        # Fallback : commande "legacy" sans lignes order_items → on synthétise
+        # un item virtuel pour ne pas afficher "0 article".
+        if not enriched_items and order.get('article_type'):
+            enriched_items.append({
+                'id': None,
+                'article_type': order.get('article_type'),
+                'service_type': order.get('service_type'),
+                'is_high_value': order.get('is_high_value', 0),
+                'base_price': order.get('base_price', 0),
+                'final_price': order.get('final_price', 0),
+                'price_overridden': order.get('price_overridden', 0),
+                'notes': order.get('notes', ''),
+                'status': order.get('status', 'received'),
+                'article_fr': art.get('fr', order.get('article_type', '')),
+                'article_ar': art.get('ar', ''),
+                'service_fr': svc.get('fr', order.get('service_type', '')),
+                'service_ar': svc.get('ar', ''),
+            })
         order['items'] = enriched_items
         order['items_count'] = len(enriched_items)
 
