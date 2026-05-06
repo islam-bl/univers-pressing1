@@ -1,355 +1,384 @@
-# ══════════════════════════════════════════════════════════════
-# models/order.py — Modèle Commande
-# Gère toutes les opérations CRUD sur les commandes du pressing.
-# Supporte SQLite (local) et PostgreSQL (production Railway).
-# Chaque commande est liée à un utilisateur via created_by.
-# ══════════════════════════════════════════════════════════════
-
-import random, string
+"""
+Modèle Order — une commande contient un ou plusieurs articles (order_items).
+- Le statut global de la commande devient 'ready' uniquement quand TOUS les
+  articles sont prêts.
+- Le prix total = somme des final_price des items.
+- Chaque action (création, mise à prêt, retrait) est attribuée à un utilisateur.
+- Le gérant voit ses commandes ET celles de ses employés (via manager_id).
+"""
+import random
+import string
 from datetime import datetime
 from models.database import get_db, DATABASE_URL
 from models.catalog import CATALOG, SERVICE_TYPES, get_price
 
-# Placeholder SQL : %s pour PostgreSQL, ? pour SQLite
 PH = '%s' if DATABASE_URL else '?'
+
 
 class Order:
 
+    # ── Helpers ──────────────────────────────────────────────
     @staticmethod
     def generate_order_number():
-        """Génère un numéro de commande unique : UP-YYYYMMDD-XXXX"""
-        date = datetime.now().strftime('%Y%m%d')
-        rand = ''.join(random.choices(string.digits, k=4))
-        return f"UP-{date}-{rand}"
+        return f"UP-{datetime.now().strftime('%Y%m%d')}-{''.join(random.choices(string.digits, k=4))}"
 
     @staticmethod
     def generate_pickup_code():
-        """Génère un code de retrait aléatoire de 6 caractères alphanumériques"""
         return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
     @staticmethod
-    def create(data, photo_filename=None, user_id=None):
-        """
-        Crée une nouvelle commande dans la base de données.
-        - data : dictionnaire contenant les champs du formulaire
-        - photo_filename : nom du fichier photo (optionnel)
-        - user_id : ID de l'utilisateur connecté (pour l'isolation des données)
-        Retourne la commande créée enrichie avec les labels du catalogue.
-        """
-        order_number = Order.generate_order_number()
-        pickup_code  = Order.generate_pickup_code()
-        base_price   = get_price(data.get('article_type'), data.get('service_type')) or 0.0
-        final_price  = float(data.get('final_price', base_price))
-        conn = get_db()
+    def _exec(conn, sql, params=()):
         if DATABASE_URL:
-            c = conn.cursor()
-            c.execute(f'''
-                INSERT INTO orders (order_number,pickup_code,customer_name,customer_phone,
-                    article_type,service_type,is_high_value,base_price,final_price,
-                    price_overridden,deposit_date,expected_pickup_date,status,
-                    authorized_person_name,authorized_person_relation,article_photo,notes,created_by)
-                VALUES ({PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH})
-                RETURNING id
-            ''', (order_number, pickup_code,
-                  data.get('customer_name'), data.get('customer_phone'),
-                  data.get('article_type'), data.get('service_type'),
-                  int(data.get('is_high_value', 0)), base_price, final_price,
-                  int(data.get('price_overridden', 0)),
-                  data.get('deposit_date'), data.get('expected_pickup_date'),
-                  'received',
-                  data.get('authorized_person_name',''), data.get('authorized_person_relation',''),
-                  photo_filename, data.get('notes',''), user_id))
-            oid = c.fetchone()['id']
-            c.execute(f'INSERT INTO order_history (order_id,action,details) VALUES ({PH},{PH},{PH})',
-                     (oid, 'created', f"Commande créée pour {data.get('customer_name')}"))
-            conn.commit()
-            c.execute(f'SELECT * FROM orders WHERE id={PH}', (oid,))
-            order = dict(c.fetchone())
-            c.close()
+            c = conn.cursor(); c.execute(sql, params); return c
         else:
-            conn.execute(f'''
-                INSERT INTO orders (order_number,pickup_code,customer_name,customer_phone,
-                    article_type,service_type,is_high_value,base_price,final_price,
-                    price_overridden,deposit_date,expected_pickup_date,status,
-                    authorized_person_name,authorized_person_relation,article_photo,notes,created_by)
-                VALUES ({PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH})
-            ''', (order_number, pickup_code,
-                  data.get('customer_name'), data.get('customer_phone'),
-                  data.get('article_type'), data.get('service_type'),
-                  int(data.get('is_high_value', 0)), base_price, final_price,
-                  int(data.get('price_overridden', 0)),
-                  data.get('deposit_date'), data.get('expected_pickup_date'),
-                  'received',
-                  data.get('authorized_person_name',''), data.get('authorized_person_relation',''),
-                  photo_filename, data.get('notes',''), user_id))
-            oid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-            conn.execute(f'INSERT INTO order_history (order_id,action,details) VALUES ({PH},{PH},{PH})',
-                     (oid, 'created', f"Commande créée pour {data.get('customer_name')}"))
-            conn.commit()
-            order = dict(conn.execute(f'SELECT * FROM orders WHERE id={PH}',(oid,)).fetchone())
-        conn.close()
-        return Order._enrich(order)
+            return conn.execute(sql, params)
 
+    @staticmethod
+    def _fetch_one(conn, sql, params=()):
+        if DATABASE_URL:
+            c = conn.cursor(); c.execute(sql, params)
+            row = c.fetchone(); c.close()
+            return dict(row) if row else None
+        else:
+            row = conn.execute(sql, params).fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def _fetch_all(conn, sql, params=()):
+        if DATABASE_URL:
+            c = conn.cursor(); c.execute(sql, params)
+            rows = c.fetchall(); c.close()
+        else:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── CREATE ───────────────────────────────────────────────
+    @staticmethod
+    def create(data, items, photo_filename=None, user_id=None, manager_id=None):
+        """
+        Crée une commande avec une liste d'articles.
+        - data : dict avec customer_name, customer_phone, deposit_date,
+                 expected_pickup_date, authorized_person_name, authorized_person_relation, notes
+        - items : list de dicts {article_type, service_type, is_high_value,
+                                 final_price, price_overridden, notes}
+        """
+        if not items:
+            raise ValueError("Au moins un article est requis pour une commande.")
+
+        order_number = Order.generate_order_number()
+        pickup_code = Order.generate_pickup_code()
+
+        # On garde les champs "principaux" de l'article 1 dans orders pour
+        # rétrocompatibilité (anciennes vues / requêtes).
+        first = items[0]
+        first_base_price = get_price(first.get('article_type'), first.get('service_type')) or 0.0
+        first_final_price = float(first.get('final_price') or first_base_price or 0)
+
+        total_price = 0.0
+        enriched_items = []
+        for it in items:
+            base = get_price(it.get('article_type'), it.get('service_type')) or 0.0
+            final = float(it.get('final_price') or base or 0)
+            total_price += final
+            enriched_items.append({
+                **it,
+                'base_price': base,
+                'final_price': final,
+                'is_high_value': int(it.get('is_high_value', 0) or 0),
+                'price_overridden': int(it.get('price_overridden', 0) or 0),
+                'notes': it.get('notes', '') or '',
+            })
+
+        conn = get_db()
+        try:
+            if DATABASE_URL:
+                c = conn.cursor()
+                c.execute(f'''
+                    INSERT INTO orders (order_number, pickup_code, customer_name, customer_phone,
+                        article_type, service_type, is_high_value, base_price, final_price,
+                        total_price, price_overridden, deposit_date, expected_pickup_date,
+                        status, global_status,
+                        authorized_person_name, authorized_person_relation, article_photo, notes,
+                        created_by, manager_id)
+                    VALUES ({PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH})
+                    RETURNING id
+                ''', (order_number, pickup_code,
+                      data.get('customer_name'), data.get('customer_phone'),
+                      first.get('article_type'), first.get('service_type'),
+                      enriched_items[0]['is_high_value'],
+                      enriched_items[0]['base_price'], enriched_items[0]['final_price'],
+                      total_price, enriched_items[0]['price_overridden'],
+                      data.get('deposit_date'), data.get('expected_pickup_date'),
+                      'received', 'received',
+                      data.get('authorized_person_name', ''),
+                      data.get('authorized_person_relation', ''),
+                      photo_filename, data.get('notes', ''),
+                      user_id, manager_id))
+                oid = c.fetchone()['id']
+                for it in enriched_items:
+                    c.execute(f'''
+                        INSERT INTO order_items (order_id, article_type, service_type,
+                            is_high_value, base_price, final_price, price_overridden, notes, status)
+                        VALUES ({PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH})
+                    ''', (oid, it['article_type'], it['service_type'],
+                          it['is_high_value'], it['base_price'], it['final_price'],
+                          it['price_overridden'], it['notes'], 'received'))
+                c.execute(f'INSERT INTO order_history (order_id, action, details, user_id) VALUES ({PH},{PH},{PH},{PH})',
+                          (oid, 'created', f"Commande créée pour {data.get('customer_name')} ({len(items)} article(s))", user_id))
+                c.execute(f'INSERT INTO operations (order_id, user_id, manager_id, action_type, amount, details) VALUES ({PH},{PH},{PH},{PH},{PH},{PH})',
+                          (oid, user_id, manager_id, 'order_created', 0, f"{len(items)} article(s)"))
+                conn.commit()
+                c.close()
+            else:
+                cur = conn.execute(f'''
+                    INSERT INTO orders (order_number, pickup_code, customer_name, customer_phone,
+                        article_type, service_type, is_high_value, base_price, final_price,
+                        total_price, price_overridden, deposit_date, expected_pickup_date,
+                        status, global_status,
+                        authorized_person_name, authorized_person_relation, article_photo, notes,
+                        created_by, manager_id)
+                    VALUES ({PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH})
+                ''', (order_number, pickup_code,
+                      data.get('customer_name'), data.get('customer_phone'),
+                      first.get('article_type'), first.get('service_type'),
+                      enriched_items[0]['is_high_value'],
+                      enriched_items[0]['base_price'], enriched_items[0]['final_price'],
+                      total_price, enriched_items[0]['price_overridden'],
+                      data.get('deposit_date'), data.get('expected_pickup_date'),
+                      'received', 'received',
+                      data.get('authorized_person_name', ''),
+                      data.get('authorized_person_relation', ''),
+                      photo_filename, data.get('notes', ''),
+                      user_id, manager_id))
+                oid = cur.lastrowid
+                for it in enriched_items:
+                    conn.execute(f'''
+                        INSERT INTO order_items (order_id, article_type, service_type,
+                            is_high_value, base_price, final_price, price_overridden, notes, status)
+                        VALUES ({PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH},{PH})
+                    ''', (oid, it['article_type'], it['service_type'],
+                          it['is_high_value'], it['base_price'], it['final_price'],
+                          it['price_overridden'], it['notes'], 'received'))
+                conn.execute(f'INSERT INTO order_history (order_id, action, details, user_id) VALUES ({PH},{PH},{PH},{PH})',
+                             (oid, 'created', f"Commande créée pour {data.get('customer_name')} ({len(items)} article(s))", user_id))
+                conn.execute(f'INSERT INTO operations (order_id, user_id, manager_id, action_type, amount, details) VALUES ({PH},{PH},{PH},{PH},{PH},{PH})',
+                             (oid, user_id, manager_id, 'order_created', 0, f"{len(items)} article(s)"))
+                conn.commit()
+        finally:
+            conn.close()
+
+        return Order.get_by_id(oid)
+
+    # ── GET BY ID ────────────────────────────────────────────
     @staticmethod
     def get_by_id(order_id):
-        """
-        Récupère une commande par son ID avec son historique complet.
-        Retourne None si la commande n'existe pas.
-        """
         conn = get_db()
-        if DATABASE_URL:
-            c = conn.cursor()
-            c.execute(f'SELECT * FROM orders WHERE id={PH}', (order_id,))
-            row = c.fetchone()
-            c.execute(f'SELECT * FROM order_history WHERE order_id={PH} ORDER BY timestamp DESC', (order_id,))
-            history = c.fetchall()
-            c.close()
-        else:
-            row = conn.execute(f'SELECT * FROM orders WHERE id={PH}',(order_id,)).fetchone()
-            history = conn.execute(f'SELECT * FROM order_history WHERE order_id={PH} ORDER BY timestamp DESC',(order_id,)).fetchall()
+        order = Order._fetch_one(conn, f'SELECT * FROM orders WHERE id={PH}', (order_id,))
+        if not order:
+            conn.close(); return None
+        items = Order._fetch_all(conn, f'SELECT * FROM order_items WHERE order_id={PH} ORDER BY id ASC', (order_id,))
+        history = Order._fetch_all(conn, f'SELECT * FROM order_history WHERE order_id={PH} ORDER BY timestamp DESC', (order_id,))
         conn.close()
-        if not row:
-            return None
-        order = Order._enrich(dict(row))
-        order['history'] = [dict(h) for h in history]
-        return order
+        return Order._enrich(order, items, history)
 
+    # ── GET BY PICKUP CODE ───────────────────────────────────
     @staticmethod
     def get_by_pickup_code(code, status='ready'):
-        """
-        Récupère une commande par son code de retrait et son statut.
-        Utilisé lors du retrait d'un article par le client.
-        """
         conn = get_db()
-        if DATABASE_URL:
-            c = conn.cursor()
-            c.execute(f'SELECT * FROM orders WHERE pickup_code={PH} AND status={PH}', (code.upper(), status))
-            row = c.fetchone()
-            c.close()
-        else:
-            row = conn.execute(f'SELECT * FROM orders WHERE pickup_code={PH} AND status={PH}',(code.upper(), status)).fetchone()
+        order = Order._fetch_one(
+            conn,
+            f'SELECT * FROM orders WHERE pickup_code={PH} AND global_status={PH}',
+            (code.upper(), status)
+        )
+        if not order:
+            conn.close(); return None
+        items = Order._fetch_all(conn, f'SELECT * FROM order_items WHERE order_id={PH} ORDER BY id ASC', (order['id'],))
         conn.close()
-        if not row:
-            return None
-        return Order._enrich(dict(row))
+        return Order._enrich(order, items)
 
+    # ── LIST ─────────────────────────────────────────────────
     @staticmethod
-    def list_by_status(status=None, user_id=None):
+    def list_by_status(status=None, user_id=None, manager_id=None, include_team=False):
         """
-        Liste les commandes filtrées par statut ET par utilisateur.
-        - status : 'received', 'ready', 'completed' ou None (toutes)
-        - user_id : ID de l'utilisateur connecté — chaque utilisateur
-          ne voit que SES propres commandes (isolation des données).
+        - include_team=True : retourne aussi les commandes des employés (gérant)
+        - sinon : commandes du seul user_id
         """
         conn = get_db()
-        if DATABASE_URL:
-            c = conn.cursor()
-            if status and user_id:
-                # Filtre par statut ET par utilisateur
-                c.execute(f'SELECT * FROM orders WHERE status={PH} AND created_by={PH} ORDER BY created_at DESC', (status, user_id))
-            elif user_id:
-                # Filtre par utilisateur uniquement
-                c.execute(f'SELECT * FROM orders WHERE created_by={PH} ORDER BY created_at DESC', (user_id,))
-            elif status:
-                c.execute(f'SELECT * FROM orders WHERE status={PH} ORDER BY created_at DESC', (status,))
-            else:
-                c.execute('SELECT * FROM orders ORDER BY created_at DESC')
-            rows = c.fetchall()
-            c.close()
-        else:
-            if status and user_id:
-                rows = conn.execute(f'SELECT * FROM orders WHERE status={PH} AND created_by={PH} ORDER BY created_at DESC',(status, user_id)).fetchall()
-            elif user_id:
-                rows = conn.execute(f'SELECT * FROM orders WHERE created_by={PH} ORDER BY created_at DESC',(user_id,)).fetchall()
-            elif status:
-                rows = conn.execute(f'SELECT * FROM orders WHERE status={PH} ORDER BY created_at DESC',(status,)).fetchall()
-            else:
-                rows = conn.execute('SELECT * FROM orders ORDER BY created_at DESC').fetchall()
+        where = []
+        params = []
+        if include_team and manager_id is not None:
+            # manager_id est le gérant lui-même (donc ses commandes + celles
+            # de ses employés rattachés)
+            where.append(f"(manager_id={PH} OR created_by={PH})")
+            params.extend([manager_id, manager_id])
+        elif user_id is not None:
+            where.append(f"created_by={PH}")
+            params.append(user_id)
+        if status:
+            where.append(f"global_status={PH}")
+            params.append(status)
+        sql = "SELECT * FROM orders"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY created_at DESC"
+        orders = Order._fetch_all(conn, sql, tuple(params))
+        # Joindre les items (une seule requête)
+        result = []
+        for o in orders:
+            items = Order._fetch_all(conn, f'SELECT * FROM order_items WHERE order_id={PH} ORDER BY id ASC', (o['id'],))
+            result.append(Order._enrich(o, items))
         conn.close()
-        return [Order._enrich(dict(r)) for r in rows]
+        return result
 
+    # ── ITEMS : marquer un article prêt ──────────────────────
     @staticmethod
-    def update_status(order_id, new_status):
-        """
-        Met à jour le statut d'une commande.
-        Statuts possibles : 'received' → 'ready' → 'completed'
-        Enregistre le changement dans l'historique.
-        """
+    def mark_item_ready(order_id, item_id, user_id=None):
+        """Marque un item comme prêt. Recalcule le statut global de la commande."""
         conn = get_db()
-        if DATABASE_URL:
-            c = conn.cursor()
-            c.execute(f'SELECT * FROM orders WHERE id={PH}', (order_id,))
-            row = c.fetchone()
+        try:
+            now_iso = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            # Vérifier appartenance
+            row = Order._fetch_one(conn,
+                f'SELECT id FROM order_items WHERE id={PH} AND order_id={PH}',
+                (item_id, order_id))
             if not row:
-                c.close(); conn.close(); return None
-            old_status = row['status']
-            if new_status == 'completed':
-                # Enregistre la date réelle de retrait
-                c.execute(f'UPDATE orders SET status={PH},actual_pickup_date={PH},updated_at=CURRENT_TIMESTAMP WHERE id={PH}',
-                         (new_status, datetime.now().strftime('%Y-%m-%d'), order_id))
-            else:
-                c.execute(f'UPDATE orders SET status={PH},updated_at=CURRENT_TIMESTAMP WHERE id={PH}',(new_status,order_id))
-            c.execute(f'INSERT INTO order_history (order_id,action,details) VALUES ({PH},{PH},{PH})',
-                     (order_id,'status_change',f'{old_status} → {new_status}'))
+                return None, False
+            Order._exec(conn,
+                f'UPDATE order_items SET status={PH}, marked_ready_by={PH}, marked_ready_at={PH} WHERE id={PH}',
+                ('ready', user_id, now_iso, item_id))
+            # Recalcul statut global
+            items = Order._fetch_all(conn, f'SELECT status FROM order_items WHERE order_id={PH}', (order_id,))
+            all_ready = items and all(it['status'] in ('ready', 'completed') for it in items)
+            became_ready = False
+            current = Order._fetch_one(conn, f'SELECT global_status FROM orders WHERE id={PH}', (order_id,))
+            if all_ready and current and current['global_status'] != 'ready':
+                Order._exec(conn,
+                    f'UPDATE orders SET global_status={PH}, status={PH}, updated_at=CURRENT_TIMESTAMP WHERE id={PH}',
+                    ('ready', 'ready', order_id))
+                became_ready = True
+                Order._exec(conn,
+                    f'INSERT INTO order_history (order_id, action, details, user_id) VALUES ({PH},{PH},{PH},{PH})',
+                    (order_id, 'status_change', 'received → ready (tous articles prêts)', user_id))
+            Order._exec(conn,
+                f'INSERT INTO order_history (order_id, action, details, user_id) VALUES ({PH},{PH},{PH},{PH})',
+                (order_id, 'item_ready', f'Article #{item_id} marqué prêt', user_id))
+            Order._exec(conn,
+                f'INSERT INTO operations (order_id, user_id, action_type, amount, details) VALUES ({PH},{PH},{PH},{PH},{PH})',
+                (order_id, user_id, 'item_marked_ready', 0, f'item #{item_id}'))
             conn.commit()
-            c.execute(f'SELECT * FROM orders WHERE id={PH}', (order_id,))
-            order = Order._enrich(dict(c.fetchone()))
-            c.close()
-        else:
-            row = conn.execute(f'SELECT * FROM orders WHERE id={PH}',(order_id,)).fetchone()
-            if not row:
-                conn.close(); return None
-            old_status = row['status']
-            if new_status == 'completed':
-                conn.execute(f'UPDATE orders SET status={PH},actual_pickup_date={PH},updated_at=CURRENT_TIMESTAMP WHERE id={PH}',
-                         (new_status, datetime.now().strftime('%Y-%m-%d'), order_id))
-            else:
-                conn.execute(f'UPDATE orders SET status={PH},updated_at=CURRENT_TIMESTAMP WHERE id={PH}',(new_status,order_id))
-            conn.execute(f'INSERT INTO order_history (order_id,action,details) VALUES ({PH},{PH},{PH})',
-                     (order_id,'status_change',f'{old_status} → {new_status}'))
-            conn.commit()
-            order = Order._enrich(dict(conn.execute(f'SELECT * FROM orders WHERE id={PH}',(order_id,)).fetchone()))
-        conn.close()
-        return order
+        finally:
+            conn.close()
+        return Order.get_by_id(order_id), became_ready
 
+    # ── COMPLETER LA COMMANDE (RETRAIT) ──────────────────────
     @staticmethod
-    def update(order_id, data, photo_filename=None):
-        """
-        Modifie les informations d'une commande existante.
-        Conserve la photo actuelle si aucune nouvelle photo n'est fournie.
-        """
+    def complete(order_id, user_id=None):
         conn = get_db()
-        if DATABASE_URL:
-            c = conn.cursor()
-            c.execute(f'SELECT * FROM orders WHERE id={PH}', (order_id,))
-            row = c.fetchone()
-            if not row:
-                c.close(); conn.close(); return None
-            base_price = get_price(data.get('article_type'), data.get('service_type')) or 0.0
-            final_price = float(data.get('final_price', base_price))
-            new_photo = photo_filename if photo_filename else row['article_photo']
-            c.execute(f'''
-                UPDATE orders SET
-                    customer_name={PH}, customer_phone={PH},
-                    article_type={PH}, service_type={PH},
-                    is_high_value={PH}, base_price={PH}, final_price={PH},
-                    price_overridden={PH}, deposit_date={PH}, expected_pickup_date={PH},
-                    authorized_person_name={PH}, authorized_person_relation={PH},
-                    article_photo={PH}, notes={PH}, updated_at=CURRENT_TIMESTAMP
-                WHERE id={PH}
-            ''', (data.get('customer_name'), data.get('customer_phone'),
-                data.get('article_type'), data.get('service_type'),
-                int(data.get('is_high_value', 0)), base_price, final_price,
-                int(data.get('price_overridden', 0)),
-                data.get('deposit_date'), data.get('expected_pickup_date'),
-                data.get('authorized_person_name', ''), data.get('authorized_person_relation', ''),
-                new_photo, data.get('notes', ''), order_id))
-            c.execute(f'INSERT INTO order_history (order_id,action,details) VALUES ({PH},{PH},{PH})',
-                     (order_id, 'updated', "Commande modifiée"))
+        try:
+            today = datetime.now().strftime('%Y-%m-%d')
+            Order._exec(conn,
+                f'UPDATE orders SET global_status={PH}, status={PH}, actual_pickup_date={PH}, updated_at=CURRENT_TIMESTAMP WHERE id={PH}',
+                ('completed', 'completed', today, order_id))
+            Order._exec(conn,
+                f"UPDATE order_items SET status='completed' WHERE order_id={PH}",
+                (order_id,))
+            Order._exec(conn,
+                f'INSERT INTO order_history (order_id, action, details, user_id) VALUES ({PH},{PH},{PH},{PH})',
+                (order_id, 'status_change', '→ completed', user_id))
+            order = Order._fetch_one(conn, f'SELECT total_price FROM orders WHERE id={PH}', (order_id,))
+            amount = float(order['total_price'] or 0) if order else 0
+            Order._exec(conn,
+                f'INSERT INTO operations (order_id, user_id, action_type, amount, details) VALUES ({PH},{PH},{PH},{PH},{PH})',
+                (order_id, user_id, 'pickup_completed', amount, 'Retrait validé'))
             conn.commit()
-            c.execute(f'SELECT * FROM orders WHERE id={PH}', (order_id,))
-            order = Order._enrich(dict(c.fetchone()))
-            c.close()
-        else:
-            row = conn.execute(f'SELECT * FROM orders WHERE id={PH}', (order_id,)).fetchone()
-            if not row:
-                conn.close(); return None
-            base_price = get_price(data.get('article_type'), data.get('service_type')) or 0.0
-            final_price = float(data.get('final_price', base_price))
-            new_photo = photo_filename if photo_filename else row['article_photo']
-            conn.execute(f'''
-                UPDATE orders SET
-                    customer_name={PH}, customer_phone={PH},
-                    article_type={PH}, service_type={PH},
-                    is_high_value={PH}, base_price={PH}, final_price={PH},
-                    price_overridden={PH}, deposit_date={PH}, expected_pickup_date={PH},
-                    authorized_person_name={PH}, authorized_person_relation={PH},
-                    article_photo={PH}, notes={PH}, updated_at=CURRENT_TIMESTAMP
-                WHERE id={PH}
-            ''', (data.get('customer_name'), data.get('customer_phone'),
-                data.get('article_type'), data.get('service_type'),
-                int(data.get('is_high_value', 0)), base_price, final_price,
-                int(data.get('price_overridden', 0)),
-                data.get('deposit_date'), data.get('expected_pickup_date'),
-                data.get('authorized_person_name', ''), data.get('authorized_person_relation', ''),
-                new_photo, data.get('notes', ''), order_id))
-            conn.execute(f'INSERT INTO order_history (order_id,action,details) VALUES ({PH},{PH},{PH})',
-                     (order_id, 'updated', "Commande modifiée"))
-            conn.commit()
-            order = Order._enrich(dict(conn.execute(f'SELECT * FROM orders WHERE id={PH}', (order_id,)).fetchone()))
-        conn.close()
-        return order
+        finally:
+            conn.close()
+        return Order.get_by_id(order_id)
 
+    # ── DELETE ───────────────────────────────────────────────
     @staticmethod
     def delete(order_id):
-        """
-        Supprime définitivement une commande et tout son historique.
-        Retourne True si supprimée, False si introuvable.
-        """
         conn = get_db()
-        if DATABASE_URL:
-            c = conn.cursor()
-            c.execute(f'SELECT id FROM orders WHERE id={PH}', (order_id,))
-            if not c.fetchone():
-                c.close(); conn.close(); return False
-            c.execute(f'DELETE FROM order_history WHERE order_id={PH}', (order_id,))
-            c.execute(f'DELETE FROM orders WHERE id={PH}', (order_id,))
+        try:
+            row = Order._fetch_one(conn, f'SELECT id FROM orders WHERE id={PH}', (order_id,))
+            if not row:
+                return False
+            Order._exec(conn, f'DELETE FROM order_items WHERE order_id={PH}', (order_id,))
+            Order._exec(conn, f'DELETE FROM order_history WHERE order_id={PH}', (order_id,))
+            Order._exec(conn, f'DELETE FROM orders WHERE id={PH}', (order_id,))
             conn.commit()
-            c.close()
-        else:
-            if not conn.execute(f'SELECT id FROM orders WHERE id={PH}', (order_id,)).fetchone():
-                conn.close(); return False
-            conn.execute(f'DELETE FROM order_history WHERE order_id={PH}', (order_id,))
-            conn.execute(f'DELETE FROM orders WHERE id={PH}', (order_id,))
-            conn.commit()
-        conn.close()
+        finally:
+            conn.close()
         return True
 
+    # ── SEARCH ───────────────────────────────────────────────
     @staticmethod
-    def search(q, user_id=None):
-        """
-        Recherche des commandes par nom client, téléphone, numéro ou code.
-        Filtré par user_id pour n'afficher que les commandes de l'utilisateur connecté.
-        """
+    def search(q, user_id=None, manager_id=None, include_team=False):
         conn = get_db()
-        if DATABASE_URL:
-            c = conn.cursor()
-            if user_id:
-                c.execute(f'''SELECT * FROM orders WHERE created_by={PH} AND (
-                    customer_name ILIKE {PH} OR customer_phone ILIKE {PH} OR order_number ILIKE {PH} OR pickup_code ILIKE {PH})
-                    ORDER BY created_at DESC LIMIT 50''',
-                    (user_id, f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%'))
-            else:
-                c.execute(f'''SELECT * FROM orders WHERE
-                    customer_name ILIKE {PH} OR customer_phone ILIKE {PH} OR order_number ILIKE {PH} OR pickup_code ILIKE {PH}
-                    ORDER BY created_at DESC LIMIT 50''',
-                    (f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%'))
-            rows = c.fetchall()
-            c.close()
+        like = f'%{q}%'
+        op = 'ILIKE' if DATABASE_URL else 'LIKE'
+        if include_team and manager_id is not None:
+            sql = f'''SELECT * FROM orders WHERE (manager_id={PH} OR created_by={PH}) AND (
+                customer_name {op} {PH} OR customer_phone {op} {PH}
+                OR order_number {op} {PH} OR pickup_code {op} {PH})
+                ORDER BY created_at DESC LIMIT 50'''
+            params = (manager_id, manager_id, like, like, like, like)
+        elif user_id is not None:
+            sql = f'''SELECT * FROM orders WHERE created_by={PH} AND (
+                customer_name {op} {PH} OR customer_phone {op} {PH}
+                OR order_number {op} {PH} OR pickup_code {op} {PH})
+                ORDER BY created_at DESC LIMIT 50'''
+            params = (user_id, like, like, like, like)
         else:
-            if user_id:
-                rows = conn.execute(f'''SELECT * FROM orders WHERE created_by={PH} AND (
-                    customer_name LIKE {PH} OR customer_phone LIKE {PH} OR order_number LIKE {PH} OR pickup_code LIKE {PH})
-                    ORDER BY created_at DESC LIMIT 50''',
-                    (user_id, f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%')).fetchall()
-            else:
-                rows = conn.execute(f'''SELECT * FROM orders WHERE
-                    customer_name LIKE {PH} OR customer_phone LIKE {PH} OR order_number LIKE {PH} OR pickup_code LIKE {PH}
-                    ORDER BY created_at DESC LIMIT 50''',
-                    (f'%{q}%',f'%{q}%',f'%{q}%',f'%{q}%')).fetchall()
+            sql = f'''SELECT * FROM orders WHERE
+                customer_name {op} {PH} OR customer_phone {op} {PH}
+                OR order_number {op} {PH} OR pickup_code {op} {PH}
+                ORDER BY created_at DESC LIMIT 50'''
+            params = (like, like, like, like)
+        orders = Order._fetch_all(conn, sql, params)
+        result = []
+        for o in orders:
+            items = Order._fetch_all(conn, f'SELECT * FROM order_items WHERE order_id={PH} ORDER BY id ASC', (o['id'],))
+            result.append(Order._enrich(o, items))
         conn.close()
-        return [Order._enrich(dict(r)) for r in rows]
+        return result
 
+    # ── ENRICH ───────────────────────────────────────────────
     @staticmethod
-    def _enrich(order):
-        """
-        Enrichit une commande avec les labels français/arabe du catalogue.
-        Ajoute article_fr, article_ar, service_fr, service_ar.
-        """
+    def _enrich(order, items=None, history=None):
         art = CATALOG.get(order.get('article_type'), {})
         svc = SERVICE_TYPES.get(order.get('service_type'), {})
-        order['article_fr'] = art.get('fr', order.get('article_type',''))
+        order['article_fr'] = art.get('fr', order.get('article_type', '') or '')
         order['article_ar'] = art.get('ar', '')
-        order['service_fr'] = svc.get('fr', order.get('service_type',''))
+        order['service_fr'] = svc.get('fr', order.get('service_type', '') or '')
         order['service_ar'] = svc.get('ar', '')
+
+        # Items enrichis
+        enriched_items = []
+        if items:
+            for it in items:
+                a = CATALOG.get(it.get('article_type'), {})
+                s = SERVICE_TYPES.get(it.get('service_type'), {})
+                enriched_items.append({
+                    **it,
+                    'article_fr': a.get('fr', it.get('article_type', '')),
+                    'article_ar': a.get('ar', ''),
+                    'service_fr': s.get('fr', it.get('service_type', '')),
+                    'service_ar': s.get('ar', ''),
+                })
+        order['items'] = enriched_items
+        order['items_count'] = len(enriched_items)
+
+        # Recalcule total_price (sécurité)
+        if enriched_items:
+            order['total_price'] = round(sum(float(it.get('final_price') or 0) for it in enriched_items), 2)
+        else:
+            order['total_price'] = float(order.get('total_price') or order.get('final_price') or 0)
+
+        # global_status fallback
+        if not order.get('global_status'):
+            order['global_status'] = order.get('status', 'received')
+
+        if history is not None:
+            order['history'] = history
         return order

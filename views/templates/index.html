@@ -44,6 +44,11 @@
       <span class="nav-icon">🗂️</span>
       <span data-fr="Historique" data-ar="السجل">Historique</span>
     </button>
+    <!-- Employés : gérant uniquement -->
+    <button class="nav-btn gerant-only" onclick="showPage('employees')" id="nav-employees">
+      <span class="nav-icon">👥</span>
+      <span data-fr="Employés" data-ar="الموظفون">Employés</span>
+    </button>
     <!-- Réglages : gérant uniquement -->
     <button class="nav-btn gerant-only" onclick="showPage('settings')" id="nav-settings">
       <span class="nav-icon">⚙️</span>
@@ -193,6 +198,16 @@
             <p class="form-hint" data-fr="Prix manuel — catalogue ignoré" data-ar="سعر يدوي">Prix manuel — catalogue ignoré</p>
           </div>
         </div>
+
+        <!-- Conteneur des articles supplémentaires : juste après l'article principal -->
+        <div id="extraArticlesContainer"></div>
+
+        <!-- Prix total de la commande (visible si plusieurs articles) -->
+        <div id="orderTotalDisplay" style="display:none;background:var(--primary,#0F172A);color:#fff;border-radius:var(--radius,12px);padding:14px 18px;margin-bottom:14px;align-items:center;justify-content:space-between">
+          <span style="font-weight:700;font-size:.95rem">💰 <span data-fr="Total commande" data-ar="مجموع الطلب">Total commande</span></span>
+          <span id="orderTotalAmount" style="font-size:1.3rem;font-weight:800">0.00 MAD</span>
+        </div>
+
         <div class="form-section">
           <div class="form-section-title"><div class="section-badge">📅</div><span data-fr="Dates" data-ar="التواريخ">Dates</span></div>
           <div class="form-grid">
@@ -234,15 +249,6 @@
             <textarea name="notes" class="form-input" rows="3" placeholder="Taches, couleur, instructions spéciales..."></textarea>
           </div>
         </div>
-        <!-- Conteneur des articles supplémentaires -->
-        <div id="extraArticlesContainer"></div>
-
-        <!-- Prix total de la commande -->
-        <div id="orderTotalDisplay" style="display:none;background:var(--primary);color:#fff;border-radius:var(--radius);padding:14px 18px;margin-bottom:14px;display:none;align-items:center;justify-content:space-between">
-          <span style="font-weight:700;font-size:.95rem">💰 <span data-fr="Total commande" data-ar="مجموع الطلب">Total commande</span></span>
-          <span id="orderTotalAmount" style="font-size:1.3rem;font-weight:800">0.00 MAD</span>
-        </div>
-
         <button type="submit" class="btn btn-primary btn-lg btn-full" id="submitBtn">
           <span data-fr="Enregistrer le Dépôt" data-ar="حفظ الإيداع">Enregistrer le Dépôt</span>
         </button>
@@ -337,6 +343,49 @@
           <div id="threeMonthAlertsList"></div>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- ══ EMPLOYÉS (gérant uniquement) ══ -->
+  <section class="page" id="page-employees">
+    <div class="page-header">
+      <h1 data-fr="Gestion des employés" data-ar="إدارة الموظفين">Gestion des employés</h1>
+      <p class="page-subtitle" data-fr="Créez et gérez les comptes employés" data-ar="أنشئ وأدر حسابات الموظفين">Créez et gérez les comptes employés</p>
+    </div>
+
+    <div class="form-card" style="margin-bottom:18px">
+      <div class="form-section">
+        <div class="form-section-title">
+          <div class="section-badge">➕</div>
+          <span data-fr="Nouveau compte employé" data-ar="حساب موظف جديد">Nouveau compte employé</span>
+        </div>
+        <form id="employeeForm">
+          <div class="form-grid">
+            <div class="form-group">
+              <label data-fr="Nom complet *" data-ar="الاسم الكامل *">Nom complet *</label>
+              <input type="text" name="full_name" class="form-input" required/>
+            </div>
+            <div class="form-group">
+              <label data-fr="Identifiant *" data-ar="اسم المستخدم *">Identifiant *</label>
+              <input type="text" name="username" class="form-input" required/>
+            </div>
+            <div class="form-group">
+              <label data-fr="Mot de passe *" data-ar="كلمة المرور *">Mot de passe *</label>
+              <input type="text" name="password" class="form-input" required/>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary" style="margin-top:10px">
+            ➕ <span data-fr="Créer le compte" data-ar="إنشاء الحساب">Créer le compte</span>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-card-header">
+        <h2 data-fr="Liste des employés" data-ar="قائمة الموظفين">Liste des employés</h2>
+      </div>
+      <div id="employeesList" style="padding:8px"></div>
     </div>
   </section>
 
