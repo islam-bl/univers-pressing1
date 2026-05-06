@@ -20,6 +20,82 @@ orders_bp = Blueprint('orders', __name__)
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'uploads')
 
 
+def _truthy(value):
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on', 'oui')
+
+
+def _clean_item(raw_item, fallback_notes=''):
+    if not isinstance(raw_item, dict):
+        return None
+    article_type = (raw_item.get('article_type') or '').strip()
+    service_type = (raw_item.get('service_type') or '').strip()
+    if not article_type or not service_type:
+        return None
+    return {
+        'article_type': article_type,
+        'service_type': service_type,
+        'is_high_value': int(_truthy(raw_item.get('is_high_value', 0))),
+        'final_price': raw_item.get('final_price'),
+        'price_overridden': int(_truthy(raw_item.get('price_overridden', 0))),
+        'notes': (raw_item.get('notes') or fallback_notes or '').strip(),
+    }
+
+
+def _items_from_form(form):
+    """Retourne toujours une seule liste d'articles pour une seule commande.
+
+    Accepte le JSON `items` envoyé par le formulaire multi-articles et ignore
+    les lignes incomplètes. Ainsi 3 articles restent 1 commande + 3 détails,
+    jamais 3 commandes séparées.
+    """
+    items = []
+    items_raw = form.get('items')
+    if items_raw:
+        try:
+            parsed = json.loads(items_raw)
+            if isinstance(parsed, list):
+                items = [_clean_item(it, form.get('notes', '')) for it in parsed]
+                items = [it for it in items if it]
+        except Exception:
+            items = []
+
+    if not items:
+        article_types = form.getlist('article_type')
+        service_types = form.getlist('service_type')
+        final_prices = form.getlist('final_price')
+        high_values = form.getlist('is_high_value')
+        overridden = form.getlist('price_overridden')
+        item_notes = form.getlist('item_notes') or form.getlist('notes')
+
+        if article_types and service_types and len(article_types) > 1:
+            max_len = max(len(article_types), len(service_types))
+            for idx in range(max_len):
+                item = _clean_item({
+                    'article_type': article_types[idx] if idx < len(article_types) else '',
+                    'service_type': service_types[idx] if idx < len(service_types) else '',
+                    'is_high_value': high_values[idx] if idx < len(high_values) else 0,
+                    'final_price': final_prices[idx] if idx < len(final_prices) else None,
+                    'price_overridden': overridden[idx] if idx < len(overridden) else 0,
+                    'notes': item_notes[idx] if idx < len(item_notes) else form.get('notes', ''),
+                })
+                if item:
+                    items.append(item)
+
+    if not items and form.get('article_type') and form.get('service_type'):
+        item = _clean_item({
+            'article_type': form.get('article_type'),
+            'service_type': form.get('service_type'),
+            'is_high_value': form.get('is_high_value', 0),
+            'final_price': form.get('final_price'),
+            'price_overridden': form.get('price_overridden', 0),
+            'notes': form.get('notes', ''),
+        })
+        if item:
+            items.append(item)
+
+    return items
+
+
 def login_required():
     if 'user_id' not in session:
         return jsonify({'error': 'Non authentifié'}), 401
@@ -98,28 +174,9 @@ def api_create():
 
     form = request.form
 
-    # Construction de la liste des items
-    items = []
-    items_raw = form.get('items')
-    if items_raw:
-        try:
-            parsed = json.loads(items_raw)
-            if isinstance(parsed, list):
-                items = parsed
-        except Exception:
-            items = []
-
-    if not items:
-        # Compatibilité ascendante : un seul article via les champs classiques
-        if form.get('article_type') and form.get('service_type'):
-            items.append({
-                'article_type':     form.get('article_type'),
-                'service_type':     form.get('service_type'),
-                'is_high_value':    int(form.get('is_high_value', 0) or 0),
-                'final_price':      form.get('final_price'),
-                'price_overridden': int(form.get('price_overridden', 0) or 0),
-                'notes':            form.get('notes', ''),
-            })
+    # Construction de la liste des items : une seule commande peut contenir
+    # plusieurs articles, stockés ensuite dans order_items.
+    items = _items_from_form(form)
 
     if not items:
         return jsonify({'error': 'Aucun article fourni'}), 400
