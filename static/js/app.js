@@ -31,7 +31,7 @@ function toggleLang() {
 /* ════ NAV ════ */
 function showPage(page) {
   // Vérification des permissions pour les pages gérant-only
-  const gerantOnlyPages = ['dashboard', 'history', 'settings'];
+  const gerantOnlyPages = ['dashboard', 'history', 'settings', 'employees'];
   if (gerantOnlyPages.includes(page) && currentUserRole !== 'gerant') {
     showToast(lang === 'fr' ? '⛔ Accès réservé au gérant' : '⛔ هذه الصفحة للمسؤول فقط', 'error');
     return;
@@ -46,6 +46,7 @@ function showPage(page) {
   if (page === 'orders')    loadOrders();
   if (page === 'history')   loadHistory();
   if (page === 'settings')  loadSettings();
+  if (page === 'employees') loadEmployees();
 }
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
 
@@ -203,72 +204,77 @@ function previewPhoto(input) {
   }
 }
 
-function collectDepositItems(fd) {
-  const items = [];
-  const mainArticle = (fd.get('article_type') || '').toString();
-  const mainService = (fd.get('service_type') || '').toString();
-  const mainHighValue = document.getElementById('highValueToggle').checked;
-
-  if (mainArticle && mainService) {
-    const mainCatalogPrice = getPrice(mainArticle, mainService) || 0;
-    const mainFinalPrice = mainHighValue
-      ? (parseFloat(document.getElementById('finalPriceInput').value) || mainCatalogPrice || 0)
-      : mainCatalogPrice;
-    items.push({
-      article_type: mainArticle,
-      service_type: mainService,
-      is_high_value: mainHighValue ? 1 : 0,
-      price_overridden: mainHighValue ? 1 : 0,
-      final_price: mainFinalPrice,
-      notes: (fd.get('notes') || '').toString(),
-    });
-  }
-
-  document.querySelectorAll('[id^="extraArticle_"]').forEach(el => {
-    const idx = el.id.split('_')[1];
-    const articleType = document.getElementById(`extraArticleSelect_${idx}`)?.value || '';
-    const serviceType = document.getElementById(`extraServiceSelect_${idx}`)?.value || '';
-    if (!articleType || !serviceType) return;
-    items.push({
-      article_type: articleType,
-      service_type: serviceType,
-      is_high_value: 0,
-      price_overridden: 0,
-      final_price: getPrice(articleType, serviceType) || 0,
-      notes: el.querySelector(`[name="extra_notes_${idx}"]`)?.value || '',
-    });
-  });
-
-  return items;
-}
-
 document.getElementById('depositForm').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = document.getElementById('submitBtn');
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner" style="width:20px;height:20px;border-width:2px;margin:0 auto"></div>';
 
-  const fd = new FormData(e.target);
-  const items = collectDepositItems(fd);
-  if (!items.length) {
+  const form = e.target;
+  const fd = new FormData();
+
+  // Champs client / commande (une seule fois)
+  fd.append('customer_name',              form.customer_name.value);
+  fd.append('customer_phone',             form.customer_phone.value);
+  fd.append('deposit_date',               form.deposit_date.value);
+  fd.append('expected_pickup_date',       form.expected_pickup_date.value);
+  fd.append('authorized_person_name',     form.authorized_person_name?.value || '');
+  fd.append('authorized_person_relation', form.authorized_person_relation?.value || '');
+  fd.append('notes',                      form.notes?.value || '');
+  const photoInput = form.article_photo;
+  if (photoInput && photoInput.files && photoInput.files[0]) {
+    fd.append('article_photo', photoInput.files[0]);
+  }
+
+  // Construire la liste d'articles (article principal + articles supplémentaires)
+  const items = [];
+  const mainArt = document.getElementById('articleSelect').value;
+  const mainSvc = document.getElementById('serviceSelect').value;
+  const highVal = document.getElementById('highValueToggle').checked;
+  if (mainArt && mainSvc) {
+    let mainPrice;
+    if (highVal) mainPrice = parseFloat(document.getElementById('finalPriceInput').value) || 0;
+    else         mainPrice = getPrice(mainArt, mainSvc) || 0;
+    items.push({
+      article_type: mainArt,
+      service_type: mainSvc,
+      is_high_value: highVal ? 1 : 0,
+      price_overridden: highVal ? 1 : 0,
+      final_price: mainPrice,
+      notes: form.notes?.value || ''
+    });
+  }
+  document.querySelectorAll('[id^="extraArticle_"]').forEach(el => {
+    const idx = el.id.split('_')[1];
+    const a = document.getElementById(`extraArticleSelect_${idx}`)?.value;
+    const s = document.getElementById(`extraServiceSelect_${idx}`)?.value;
+    if (!a || !s) return;
+    const n = el.querySelector(`[name="extra_notes_${idx}"]`)?.value || '';
+    items.push({
+      article_type: a,
+      service_type: s,
+      is_high_value: 0,
+      price_overridden: 0,
+      final_price: getPrice(a, s) || 0,
+      notes: n
+    });
+  });
+
+  if (items.length === 0) {
     showToast(lang === 'fr' ? 'Ajoutez au moins un article' : 'أضف قطعة واحدة على الأقل', 'error');
     btn.disabled = false;
-    btn.innerHTML = `<span data-fr="Enregistrer le Dépôt" data-ar="حفظ الإيداع">${lang === 'fr' ? 'Enregistrer le Dépôt' : 'حفظ الإيداع'}</span>`;
+    btn.innerHTML = `<span>${lang === 'fr' ? 'Enregistrer le Dépôt' : 'حفظ الإيداع'}</span>`;
     return;
   }
 
-  fd.set('items', JSON.stringify(items));
-  fd.set('is_high_value', String(items[0].is_high_value || 0));
-  fd.set('price_overridden', String(items[0].price_overridden || 0));
-  fd.set('final_price', String(items[0].final_price || 0));
+  fd.append('items', JSON.stringify(items));
 
   try {
     const r = await fetch('/api/orders', { method: 'POST', body: fd });
     const d = await r.json();
     if (d.success) {
-      showReceiptModal(d.order, d.whatsapp_msg);
-
-      e.target.reset();
+      showMultiReceiptModal(d.order, [], d.whatsapp_msg);
+      form.reset();
       setDates();
       buildServiceSelect();
       document.getElementById('photoPreview').style.display = 'none';
@@ -280,10 +286,7 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
       extraArticleCount = 0;
       const totalDisplay = document.getElementById('orderTotalDisplay');
       if (totalDisplay) totalDisplay.style.display = 'none';
-      const totalArticles = d.order?.items_count || items.length;
-      showToast(lang === 'fr' ? `✅ 1 commande créée avec ${totalArticles} article(s) !` : `✅ تم إنشاء طلب واحد مع ${totalArticles} قطعة !`, 'success');
-      loadOrders();
-      loadDashboard();
+      showToast(lang === 'fr' ? `✅ Commande enregistrée (${items.length} article(s)) !` : `✅ تم تسجيل الطلب (${items.length} قطعة) !`, 'success');
     } else {
       showToast('Erreur: ' + (d.error || ''), 'error');
     }
@@ -294,8 +297,6 @@ document.getElementById('depositForm').addEventListener('submit', async e => {
     btn.innerHTML = `<span data-fr="Enregistrer le Dépôt" data-ar="حفظ الإيداع">${lang === 'fr' ? 'Enregistrer le Dépôt' : 'حفظ الإيداع'}</span>`;
   }
 });
-
-
 function updateOrderTotal() {
   // Calcul du prix de l'article principal
   const mainArt = document.getElementById('articleSelect').value;
@@ -423,45 +424,16 @@ function removeExtraArticle(idx) {
 }
 
 /* ════ RECEIPT MODAL ════ */
-function getOrderItems(order) {
-  if (Array.isArray(order?.items) && order.items.length) return order.items;
-  return [{
-    id: null,
-    article_type: order.article_type,
-    service_type: order.service_type,
-    article_fr: order.article_fr,
-    article_ar: order.article_ar,
-    service_fr: order.service_fr,
-    service_ar: order.service_ar,
-    final_price: order.final_price,
-    status: order.status || order.global_status || 'received',
-  }];
-}
-
 function showReceiptModal(order, waMsg) {
-  const items = getOrderItems(order);
-  const total = parseFloat(order.total_price ?? items.reduce((s, it) => s + parseFloat(it.final_price || 0), 0));
+  const art = CATALOG[order.article_type] || {};
+  const artL = art[lang === 'fr' ? 'fr' : 'ar'] || order.article_type;
+  const svcL = SERVICES[order.service_type]?.[lang === 'fr' ? 'fr' : 'ar'] || order.service_type;
   const phone = order.customer_phone?.replace(/\D/g,'') || '';
   const waLink = `https://wa.me/${phone.startsWith('0') ? '212' + phone.slice(1) : phone}?text=${encodeURIComponent(waMsg || '')}`;
-  const itemRows = items.map((it, i) => {
-    const art = CATALOG[it.article_type] || {};
-    const articleLabel = it.article_fr || art[lang === 'fr' ? 'fr' : 'ar'] || it.article_type || '';
-    const serviceLabel = it.service_fr || SERVICES[it.service_type]?.[lang === 'fr' ? 'fr' : 'ar'] || it.service_type || '';
-    return `
-      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--primary)">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
-          <div>
-            <div style="font-weight:700;font-size:.9rem;color:var(--navy)">${i + 1}. ${articleLabel}</div>
-            <div style="font-size:.8rem;color:var(--text-mid)">${serviceLabel}</div>
-            ${it.notes ? `<div style="font-size:.76rem;color:var(--text-light);margin-top:2px">${it.notes}</div>` : ''}
-          </div>
-          <div style="font-weight:800;color:var(--primary);font-size:1rem;white-space:nowrap">${parseFloat(it.final_price || 0).toFixed(2)} MAD</div>
-        </div>
-      </div>`;
-  }).join('');
 
   const html = `
     <div>
+      <!-- Zone imprimable UNIQUEMENT -->
       <div class="receipt" id="printZone">
         <div class="receipt-header">
           <div class="receipt-logo-wrap"><img src="/static/images/logo.png" alt="Logo"/></div>
@@ -473,15 +445,14 @@ function showReceiptModal(order, waMsg) {
         </div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Client':'الزبون'}</span><span class="receipt-val">${order.customer_name}</span></div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Téléphone':'رقم الهاتف'}</span><span class="receipt-val">${order.customer_phone}</span></div>
+        <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Article':'القطعة'}</span><span class="receipt-val">${artL}</span></div>
+        <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Type de service':'نوع الخدمة'}</span><span class="receipt-val">${svcL}</span></div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Date de dépôt':'تاريخ الاستلام'}</span><span class="receipt-val">${order.deposit_date}</span></div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Date de retrait':'تاريخ التسليم'}</span><span class="receipt-val">${order.expected_pickup_date}</span></div>
-        <div style="margin:14px 0 8px;font-weight:700;font-size:.85rem;color:var(--navy);text-transform:uppercase">
-          ${lang === 'fr' ? `${items.length} article(s)` : `${items.length} قطع`}
-        </div>
-        ${itemRows}
-        <div class="receipt-total"><div style="font-size:.8rem;opacity:.7">${lang==='fr'?'MONTANT TOTAL':'المبلغ الإجمالي'}</div><div class="receipt-total-amt">${total.toFixed(2)} MAD</div></div>
+        <div class="receipt-total"><div style="font-size:.8rem;opacity:.7">${lang==='fr'?'MONTANT TOTAL':'المبلغ الإجمالي'}</div><div class="receipt-total-amt">${parseFloat(order.final_price||0).toFixed(2)} MAD</div></div>
       </div>
 
+      <!-- Zone WhatsApp — exclue de l'impression -->
       <div class="no-print">
         ${waMsg ? `<div class="whatsapp-cta" style="margin-top:14px">
           <p>💬 ${lang==='fr'?'Message prêt à envoyer au client :':'الرسالة جاهزة للإرسال :'}</p>
@@ -500,8 +471,106 @@ function showReceiptModal(order, waMsg) {
   openModal(html);
 }
 
-function showMultiReceiptModal(mainOrder, _extraOrders, waMsg) {
-  showReceiptModal(mainOrder, waMsg);
+
+/* ════ REÇU MULTI-ARTICLES ════ */
+/**
+ * Affiche un reçu combiné pour plusieurs articles du même client.
+ * Calcule le total général de tous les articles.
+ * - mainOrder : la commande principale
+ * - extraOrders : tableau des commandes supplémentaires
+ * - waMsg : message WhatsApp de la commande principale
+ */
+function showMultiReceiptModal(mainOrder, extraOrders, waMsg) {
+  // Si pas d'articles supplémentaires, afficher le reçu simple
+  if (!extraOrders || extraOrders.length === 0) {
+    showReceiptModal(mainOrder, waMsg);
+    return;
+  }
+
+  // Regrouper tous les articles (principal + supplémentaires)
+  const allOrders = [mainOrder, ...extraOrders];
+
+  // Calcul du total général
+  const total = allOrders.reduce((sum, o) => sum + parseFloat(o.final_price || 0), 0);
+
+  // Construire les lignes du reçu pour chaque article
+  const articleRows = allOrders.map((o, i) => {
+    const art = CATALOG[o.article_type] || {};
+    const artL = o.article_fr || art[lang === 'fr' ? 'fr' : 'ar'] || o.article_type;
+    const svcL = o.service_fr || SERVICES[o.service_type]?.[lang === 'fr' ? 'fr' : 'ar'] || '';
+    return `
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--primary)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-weight:700;font-size:.9rem;color:var(--navy)">${i + 1}. ${artL}</div>
+            <div style="font-size:.8rem;color:var(--text-mid)">${svcL} · Code: <b>${o.pickup_code}</b></div>
+          </div>
+          <div style="font-weight:800;color:var(--primary);font-size:1rem">${parseFloat(o.final_price || 0).toFixed(2)} MAD</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Préparer le lien WhatsApp avec le total
+  const phone = mainOrder.customer_phone?.replace(/\D/g, '') || '';
+  const waPhone = phone.startsWith('0') ? '212' + phone.slice(1) : phone;
+  const waLink = `https://wa.me/${waPhone}?text=${encodeURIComponent(waMsg || '')}`;
+
+  const html = `
+    <div>
+      <div class="receipt" id="printZone">
+        <div class="receipt-header">
+          <div class="receipt-logo-wrap"><img src="/static/images/logo.png" alt="Logo"/></div>
+          <div class="receipt-company">Univers Pressing</div>
+          <div class="receipt-company-ar">عالم التصبين</div>
+          <div class="receipt-order">${lang === 'fr' ? 'Dépôt multiple' : 'إيداع متعدد'}</div>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">${lang === 'fr' ? 'Client' : 'الزبون'}</span>
+          <span class="receipt-val">${mainOrder.customer_name}</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">${lang === 'fr' ? 'Téléphone' : 'رقم الهاتف'}</span>
+          <span class="receipt-val">${mainOrder.customer_phone}</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">${lang === 'fr' ? 'Date dépôt' : 'تاريخ الإيداع'}</span>
+          <span class="receipt-val">${mainOrder.deposit_date}</span>
+        </div>
+        <div class="receipt-row">
+          <span class="receipt-label">${lang === 'fr' ? 'Retrait prévu' : 'الاستلام المتوقع'}</span>
+          <span class="receipt-val">${mainOrder.expected_pickup_date}</span>
+        </div>
+
+        <!-- Liste des articles avec prix individuels -->
+        <div style="margin:14px 0 8px;font-weight:700;font-size:.85rem;color:var(--navy);text-transform:uppercase;letter-spacing:.05em">
+          ${lang === 'fr' ? `${allOrders.length} Articles` : `${allOrders.length} قطع`}
+        </div>
+        ${articleRows}
+
+        <!-- Total général -->
+        <div class="receipt-total">
+          <div style="font-size:.8rem;opacity:.7">${lang === 'fr' ? 'TOTAL GÉNÉRAL' : 'المجموع الكلي'}</div>
+          <div class="receipt-total-amt">${total.toFixed(2)} MAD</div>
+        </div>
+      </div>
+
+      <!-- Boutons WhatsApp et actions -->
+      <div class="no-print">
+        ${waMsg ? `<div class="whatsapp-cta" style="margin-top:14px">
+          <p>💬 ${lang === 'fr' ? 'Message prêt à envoyer au client :' : 'الرسالة جاهزة للإرسال :'}</p>
+          <div class="whatsapp-msg">${waMsg}</div>
+          <div class="whatsapp-btns">
+            <button class="btn btn-success" onclick="window.open('${waLink}','_blank')">📱 WhatsApp</button>
+            <button class="btn btn-ghost" onclick="navigator.clipboard.writeText(${JSON.stringify(waMsg)});showToast('${lang === 'fr' ? 'Copié !' : 'تم النسخ !'}','success')">📋 ${lang === 'fr' ? 'Copier' : 'نسخ'}</button>
+          </div>
+        </div>` : ''}
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn btn-primary btn-full" onclick="printReceipt()">🖨️ ${lang === 'fr' ? 'Imprimer' : 'طباعة'}</button>
+          <button class="btn btn-ghost btn-full" onclick="closeModal()">${lang === 'fr' ? 'Fermer' : 'إغلاق'}</button>
+        </div>
+      </div>
+    </div>`;
+  openModal(html);
 }
 
 function printReceipt() {
@@ -543,7 +612,7 @@ async function loadDashboard() {
     document.getElementById('stat-ready').textContent     = rdy.length;
     document.getElementById('stat-completed').textContent = comp.length;
     const now = new Date(), ms = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const rev = comp.filter(o=>o.actual_pickup_date?.startsWith(ms)).reduce((s,o)=>s+parseFloat(o.total_price||o.final_price||0),0);
+    const rev = comp.filter(o=>o.actual_pickup_date?.startsWith(ms)).reduce((s,o)=>s+parseFloat(o.final_price||0),0);
     document.getElementById('stat-revenue').textContent = rev.toFixed(0);
     const recent = [...rec,...rdy].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,8);
     const el = document.getElementById('recentList');
@@ -567,7 +636,7 @@ async function loadOrders() {
 
 function renderOrders() {
   const el = document.getElementById('ordersList');
-  let list = currentFilter === 'all' ? allOrders : allOrders.filter(o=>(o.global_status || o.status)===currentFilter);
+  let list = currentFilter === 'all' ? allOrders : allOrders.filter(o=>o.status===currentFilter);
   el.innerHTML = list.length ? list.map(o=>orderCardHTML(o,false)).join('') :
     `<div class="empty-state"><div class="empty-state-icon">📋</div><h3>${lang==='fr'?'Aucune commande':'لا توجد طلبات'}</h3></div>`;
 }
@@ -582,7 +651,7 @@ function filterOrders(f, btn) {
 async function searchOrders(q) {
   if (!q.trim()) { renderOrders(); return; }
   const data = await fetch(`/api/search?q=${encodeURIComponent(q)}`).then(r=>r.json());
-  document.getElementById('ordersList').innerHTML = data.filter(o=>(o.global_status || o.status)!=='completed').map(o=>orderCardHTML(o,false)).join('');
+  document.getElementById('ordersList').innerHTML = data.filter(o=>o.status!=='completed').map(o=>orderCardHTML(o,false)).join('');
 }
 
 async function loadHistory() {
@@ -593,35 +662,40 @@ async function loadHistory() {
 }
 
 function orderCardHTML(o, compact) {
-  const items = getOrderItems(o);
-  const first = items[0] || {};
-  const art = CATALOG[first.article_type || o.article_type] || {};
-  const artL = first.article_fr || o.article_fr || art[lang==='fr'?'fr':'ar'] || first.article_type || o.article_type || '';
-  const svcL = first.service_fr || o.service_fr || SERVICES[first.service_type || o.service_type]?.[lang==='fr'?'fr':'ar'] || '';
-  const itemsCount = parseInt(o.items_count || items.length || 1, 10);
+  const items = Array.isArray(o.items) ? o.items : [];
+  const itemsCount = items.length || 1;
+  const total = parseFloat(o.total_price || 0) || items.reduce((s,it)=>s+parseFloat(it.final_price||0),0) || parseFloat(o.final_price||0);
   const status = o.global_status || o.status || 'received';
-  const badges = { received:{lbl:lang==='fr'?'Reçu':'مستلم',cls:'badge-received'}, ready:{lbl:lang==='fr'?'Prêt':'جاهز',cls:'badge-ready'}, completed:{lbl:lang==='fr'?'Terminé':'مكتمل',cls:'badge-completed'} };
+  const badges = {
+    received:{lbl:lang==='fr'?'Reçu':'مستلم',cls:'badge-received'},
+    ready:{lbl:lang==='fr'?'Prêt':'جاهز',cls:'badge-ready'},
+    completed:{lbl:lang==='fr'?'Terminé':'مكتمل',cls:'badge-completed'}
+  };
   const st = badges[status] || badges.received;
-  const hasHighValue = items.some(it => parseInt(it.is_high_value || 0, 10) === 1) || parseInt(o.is_high_value || 0, 10) === 1;
-  const hvTag = hasHighValue ? `<span style="background:var(--accent-light);color:#92400E;padding:2px 7px;border-radius:10px;font-size:.7rem;font-weight:700;margin-left:6px">⭐ ${lang==='fr'?'Haute valeur':'قيمة عالية'}</span>` : '';
-  const articleSummary = itemsCount > 1
-    ? `${itemsCount} ${lang==='fr'?'articles':'قطع'} — ${artL}${itemsCount > 1 ? ' +' + (itemsCount - 1) : ''}`
-    : `${artL} — ${svcL}`;
-  const readyBtn = !compact && status==='received' ? `<button class="btn btn-success" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();markReady(${o.id})">✅ ${lang==='fr'?'Tout prêt':'الكل جاهز'}</button>` : '';
+  const articlesLbl = lang==='fr'
+    ? `${itemsCount} article${itemsCount>1?'s':''}`
+    : `${itemsCount} ${itemsCount>1?'قطع':'قطعة'}`;
+  const summary = items.length > 1
+    ? articlesLbl
+    : (o.article_fr || (CATALOG[o.article_type]||{})[lang==='fr'?'fr':'ar'] || o.article_type || '') + ' — ' +
+      (o.service_fr || SERVICES[o.service_type]?.[lang==='fr'?'fr':'ar'] || '');
+  const hvTag = items.some(it=>it.is_high_value) || o.is_high_value
+    ? `<span style="background:var(--accent-light);color:#92400E;padding:2px 7px;border-radius:10px;font-size:.7rem;font-weight:700;margin-left:6px">⭐ ${lang==='fr'?'Haute valeur':'قيمة عالية'}</span>` : '';
+  const readyBtn = !compact && status==='received'
+    ? `<button class="btn btn-success" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();markReady(${o.id})">✅ ${lang==='fr'?'Tout marquer Prêt':'تعيين الكل جاهز'}</button>` : '';
   const deleteBtn = !compact ? `<button class="btn btn-danger" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();deleteOrder(${o.id})">🗑️ ${lang==='fr'?'Supprimer':'حذف'}</button>` : '';
-  const total = parseFloat(o.total_price || o.final_price || 0);
 
   return `<div class="order-card s-${status}" onclick="openDetail(${o.id})">
     <div class="order-main">
       <div class="order-number">${o.order_number} · ${o.pickup_code}</div>
       <div class="order-customer">${o.customer_name}${hvTag}</div>
-      <div class="order-detail">${articleSummary}</div>
+      <div class="order-detail">${summary}${items.length>1?` · <b>${articlesLbl}</b>`:''}</div>
       <div class="order-phone">📞 ${o.customer_phone}</div>
       <div style="margin-top:7px"><span class="badge ${st.cls}">${st.lbl}</span></div>
     </div>
     <div class="order-meta">
       <div class="order-price">${total.toFixed(2)}</div>
-      <div class="order-price-unit">MAD</div>
+      <div class="order-price-unit">MAD${items.length>1?' · '+lang==='fr'?'total':'مجموع':''}</div>
       <div class="order-date">📅 ${o.expected_pickup_date}</div>
     </div>
     ${!compact ? `<div class="order-actions">${readyBtn}<button class="btn btn-ghost" style="padding:8px 14px;font-size:.82rem" onclick="event.stopPropagation();openDetail(${o.id})">🔍 ${lang==='fr'?'Détails':'تفاصيل'}</button>${deleteBtn}</div>` : ''}
@@ -660,55 +734,55 @@ function showWAPrompt(order, waMsg) {
 async function openDetail(id) {
   openModal('<div class="loading-spinner"><div class="spinner"></div></div>');
   const o = await fetch(`/api/orders/${id}`).then(r=>r.json());
-  const items = getOrderItems(o);
+  const items = Array.isArray(o.items) ? o.items : [];
   const status = o.global_status || o.status || 'received';
+  const total = parseFloat(o.total_price || 0) || items.reduce((s,it)=>s+parseFloat(it.final_price||0),0);
   const statusLabel = {received:lang==='fr'?'Reçu':'مستلم',ready:lang==='fr'?'Prêt':'جاهز',completed:lang==='fr'?'Terminé':'مكتمل'};
   const badges = {received:'badge-received',ready:'badge-ready',completed:'badge-completed'};
   const hist = (o.history||[]).map(h=>`<li class="history-item"><div class="history-dot"></div><div><div style="font-weight:600;color:var(--text)">${h.action} — ${h.details||''}</div><div style="font-size:.78rem;color:var(--text-light)">${h.timestamp}</div></div></li>`).join('');
-  const total = parseFloat(o.total_price || o.final_price || 0);
-  const itemsHTML = items.map((it, i) => {
-    const art = CATALOG[it.article_type] || {};
-    const itemStatus = it.status || status;
-    const itemLabel = statusLabel[itemStatus] || statusLabel.received;
-    const itemBadge = badges[itemStatus] || badges.received;
-    const articleLabel = it.article_fr || art[lang==='fr'?'fr':'ar'] || it.article_type || '';
-    const serviceLabel = it.service_fr || SERVICES[it.service_type]?.[lang==='fr'?'fr':'ar'] || it.service_type || '';
-    const readyBtn = status !== 'completed' && itemStatus === 'received' && it.id
-      ? `<button class="btn btn-success" style="padding:5px 10px;font-size:.78rem;margin-top:6px" onclick="markArticleReady(${o.id},${it.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>`
-      : `<span style="font-size:.78rem;color:var(--success,#22c55e);font-weight:700">${itemLabel}</span>`;
+
+  // Liste des articles avec bouton "Marquer prêt" individuel
+  const itemRows = items.map((it,i) => {
+    const a = CATALOG[it.article_type]||{};
+    const aL = it.article_fr || a[lang==='fr'?'fr':'ar'] || it.article_type;
+    const sL = it.service_fr || SERVICES[it.service_type]?.[lang==='fr'?'fr':'ar'] || it.service_type;
+    const isReady = it.status === 'ready' || it.status === 'completed';
+    const cls = isReady ? 'badge-ready' : 'badge-received';
+    const lbl = isReady ? (lang==='fr'?'Prêt':'جاهز') : (lang==='fr'?'Reçu':'مستلم');
+    const action = (status !== 'completed' && !isReady)
+      ? `<button class="btn btn-success" style="padding:6px 12px;font-size:.78rem;margin-top:6px" onclick="markItemReady(${o.id},${it.id})">✅ ${lang==='fr'?'Marquer Prêt':'تعيين جاهز'}</button>`
+      : `<span style="font-size:.78rem;color:var(--success,#22c55e);font-weight:700">✅ ${lbl}</span>`;
     return `<div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--primary)">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
-        <div>
-          <div style="font-weight:700;font-size:.9rem;color:var(--navy)">${i+1}. ${articleLabel}</div>
-          <div style="font-size:.8rem;color:var(--text-mid)">${serviceLabel} · <span class="badge ${itemBadge}" style="font-size:.72rem">${itemLabel}</span></div>
-          ${it.notes ? `<div style="font-size:.78rem;color:var(--text-light);margin-top:2px">${it.notes}</div>` : ''}
-          ${readyBtn}
+        <div style="flex:1;min-width:200px">
+          <div style="font-weight:700;font-size:.92rem;color:var(--navy)">${i+1}. ${aL}</div>
+          <div style="font-size:.82rem;color:var(--text-mid)">${sL} · <span class="badge ${cls}" style="font-size:.72rem">${lbl}</span></div>
+          ${it.notes?`<div style="font-size:.78rem;color:var(--text-light);margin-top:2px">📝 ${it.notes}</div>`:''}
+          ${action}
         </div>
         <div style="font-weight:800;color:var(--primary);font-size:1rem">${parseFloat(it.final_price||0).toFixed(2)} MAD</div>
       </div>
     </div>`;
   }).join('');
 
-  const itemsBlock = `
+  const itemsBlock = items.length ? `
     <div style="margin:14px 0">
-      <div style="font-weight:700;font-size:.9rem;color:var(--navy);margin-bottom:8px">
-        📦 ${lang==='fr'?`${items.length} article(s) dans cette commande`:`${items.length} قطع في هذا الطلب`}
+      <div style="font-weight:700;font-size:.95rem;color:var(--navy);margin-bottom:8px">
+        📦 ${lang==='fr'?`Articles (${items.length})`:`القطع (${items.length})`}
       </div>
-      ${itemsHTML}
+      ${itemRows}
       <div style="background:var(--navy,#0F172A);color:#fff;border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;margin-top:8px">
-        <span style="font-weight:700;font-size:.88rem">${lang==='fr'?'TOTAL COMMANDE':'مجموع الطلب'}</span>
+        <span style="font-weight:700;font-size:.9rem">${lang==='fr'?'TOTAL COMMANDE':'مجموع الطلب'}</span>
         <span style="font-size:1.2rem;font-weight:800">${total.toFixed(2)} MAD</span>
       </div>
-      ${status === 'received' && items.length > 1 ? `<div style="font-size:.8rem;color:var(--text-mid);margin-top:8px;font-style:italic">ℹ️ ${lang==='fr'?'La commande sera marquée prête quand tous les articles seront prêts.':'يُعلَّم الطلب جاهزًا عند جهوز جميع القطع.'}</div>` : ''}
-    </div>`;
+      ${status==='received'?`<div style="font-size:.8rem;color:var(--text-mid);margin-top:8px;font-style:italic">ℹ️ ${lang==='fr'?'La commande passera à « Prête » quand tous les articles seront prêts.':'يُعلَّم الطلب جاهزًا عند جهوز جميع القطع.'}</div>`:''}
+    </div>` : '';
 
-  const receiptOrder = JSON.stringify(o).replace(/"/g,'&quot;');
   const html = `
     <div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
         <h2 style="font-weight:800;font-size:1.3rem;color:var(--navy)">${o.order_number}</h2>
         <span class="badge ${badges[status]||'badge-received'}">${statusLabel[status]||''}</span>
-        ${items.length > 1 ? `<span style="background:#DBEAFE;color:#1D4ED8;padding:3px 10px;border-radius:10px;font-size:.75rem;font-weight:700">📦 ${lang==='fr'?'Commande groupée':'طلب متعدد'}</span>` : ''}
       </div>
       <div class="detail-grid">
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Client':'الزبون'}</div><div class="detail-item-value">${o.customer_name}</div></div>
@@ -723,8 +797,8 @@ async function openDetail(id) {
       ${o.notes?`<div style="background:var(--bg);border-radius:var(--radius-sm);padding:12px 14px;font-size:.9rem;color:var(--text-mid);margin:8px 0">${o.notes}</div>`:''}
       ${hist?`<div style="margin-top:16px"><div style="font-weight:700;font-size:.9rem;color:var(--navy);margin-bottom:8px">Historique</div><ul class="history-timeline">${hist}</ul></div>`:''}
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
-        ${status==='received'?`<button class="btn btn-success" onclick="closeModal();markReady(${o.id})">✅ ${lang==='fr'?'Marquer toute la commande prête':'تعيين الطلب كله جاهز'}</button>`:''}
-        <button class="btn btn-primary" onclick="showReceiptModal(${receiptOrder})">🧾 ${lang==='fr'?'Reçu':'إيصال'}</button>
+        ${status==='received'?`<button class="btn btn-success" onclick="closeModal();markReady(${o.id})">✅ ${lang==='fr'?'Tout marquer Prêt':'تعيين الكل جاهز'}</button>`:''}
+        <button class="btn btn-primary" onclick='showReceiptModal(${JSON.stringify(o).replace(/"/g,"&quot;").replace(/'/g,"&#39;")})'>🧾 ${lang==='fr'?'Reçu':'إيصال'}</button>
         ${status!=='completed'?`<button class="btn btn-warning" onclick="openEditModal(${o.id})">✏️ ${lang==='fr'?'Modifier':'تعديل'}</button>`:''}
         <button class="btn btn-danger" onclick="deleteOrder(${o.id})">🗑️ ${lang==='fr'?'Supprimer':'حذف'}</button>
         <button class="btn btn-ghost" onclick="closeModal()">${lang==='fr'?'Fermer':'إغلاق'}</button>
@@ -734,19 +808,24 @@ async function openDetail(id) {
 }
 
 /**
- * Marque un article individuel comme prêt dans une commande multi-articles.
+ * Marque un item (article) individuel comme prêt via /api/orders/<oid>/items/<iid>/ready.
  */
-async function markArticleReady(orderId, itemId) {
+async function markItemReady(orderId, itemId) {
   if (!confirm(lang==='fr'?'Marquer cet article comme prêt ?':'تعيين هذه القطعة كجاهزة؟')) return;
-  const r = await fetch(`/api/orders/${orderId}/items/${itemId}/ready`, { method:'PUT' });
-  const d = await r.json();
-  if (d.success) {
-    showToast(lang==='fr'?'✅ Article marqué prêt !':'✅ تم تعيين القطعة كجاهزة !','success');
-    if (d.whatsapp_msg) showWAPrompt(d.order, d.whatsapp_msg);
-    loadOrders(); loadDashboard();
-    openDetail(orderId);
-  } else {
-    showToast('Erreur: ' + (d.error || ''), 'error');
+  try {
+    const r = await fetch(`/api/orders/${orderId}/items/${itemId}/ready`, { method: 'PUT' });
+    const d = await r.json();
+    if (d.success) {
+      showToast(lang==='fr'?'✅ Article marqué prêt !':'✅ تم !','success');
+      if (d.all_ready && d.whatsapp_msg) showWAPrompt(d.order, d.whatsapp_msg);
+      loadOrders();
+      if (typeof loadDashboard === 'function') loadDashboard();
+      openDetail(orderId);
+    } else {
+      showToast('Erreur: ' + (d.error || ''), 'error');
+    }
+  } catch(e) {
+    showToast('Erreur réseau', 'error');
   }
 }
 
@@ -1017,3 +1096,97 @@ function showToast(msg, type='info') {
   t.className = `toast ${type} show`;
   setTimeout(()=>t.classList.remove('show'), 4000);
 }
+
+
+/* ════════════ EMPLOYEES (gérant) ════════════ */
+async function loadEmployees() {
+  const list = document.getElementById('employeesList');
+  if (!list) return;
+  list.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+  try {
+    const r = await fetch('/api/employees');
+    if (!r.ok) {
+      list.innerHTML = `<div class="empty-state"><p>${lang==='fr'?'Accès refusé':'الوصول مرفوض'}</p></div>`;
+      return;
+    }
+    const data = await r.json();
+    if (!data.length) {
+      list.innerHTML = `<div class="empty-state"><div class="empty-state-icon">👥</div><p>${lang==='fr'?'Aucun employé pour l\'instant':'لا يوجد موظفون بعد'}</p></div>`;
+      return;
+    }
+    list.innerHTML = data.map(u => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--white)">
+        <div>
+          <div style="font-weight:700;color:var(--navy)">${u.full_name}</div>
+          <div style="font-size:.82rem;color:var(--text-mid)">@${u.username}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost" style="padding:6px 10px;font-size:.78rem" onclick="resetEmployeePassword(${u.id})">🔑 ${lang==='fr'?'Mot de passe':'كلمة المرور'}</button>
+          <button class="btn btn-danger" style="padding:6px 10px;font-size:.78rem" onclick="deleteEmployee(${u.id},'${(u.full_name||'').replace(/'/g,"\\'")}')">🗑️</button>
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    list.innerHTML = `<div style="color:var(--danger);padding:10px">Erreur réseau</div>`;
+  }
+}
+
+async function createEmployee(form) {
+  const full_name = form.full_name.value.trim();
+  const username  = form.username.value.trim().toLowerCase();
+  const password  = form.password.value;
+  if (!full_name || !username || !password) {
+    showToast(lang==='fr'?'Remplissez tous les champs':'املأ كل الحقول','error');
+    return;
+  }
+  if (password.length < 4) {
+    showToast(lang==='fr'?'Mot de passe trop court (4 min)':'كلمة المرور قصيرة (4 حد أدنى)','error');
+    return;
+  }
+  try {
+    const r = await fetch('/api/employees', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({full_name, username, password})
+    });
+    const d = await r.json();
+    if (d.success) {
+      showToast(lang==='fr'?'✅ Employé créé !':'✅ تم إنشاء الحساب !','success');
+      form.reset();
+      loadEmployees();
+    } else {
+      showToast('Erreur: ' + (d.error || (lang==='fr'?'Création impossible':'فشل الإنشاء')), 'error');
+    }
+  } catch(e) {
+    showToast('Erreur réseau', 'error');
+  }
+}
+
+async function deleteEmployee(uid, name) {
+  if (!confirm((lang==='fr'?'Supprimer ':'حذف ') + (name||''))) return;
+  try {
+    const r = await fetch(`/api/employees/${uid}`, { method: 'DELETE' });
+    const d = await r.json();
+    if (d.success) { showToast(lang==='fr'?'🗑️ Supprimé':'🗑️ تم','success'); loadEmployees(); }
+    else showToast('Erreur: ' + (d.error||''), 'error');
+  } catch(e) { showToast('Erreur réseau', 'error'); }
+}
+
+async function resetEmployeePassword(uid) {
+  const pwd = prompt(lang==='fr'?'Nouveau mot de passe (4 min) :':'كلمة المرور الجديدة (4 حد أدنى):');
+  if (!pwd || pwd.length < 4) return;
+  try {
+    const r = await fetch(`/api/employees/${uid}/password`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password: pwd})
+    });
+    const d = await r.json();
+    if (d.success) showToast(lang==='fr'?'✅ Mot de passe mis à jour':'✅ تم التحديث','success');
+    else showToast('Erreur: ' + (d.error||''), 'error');
+  } catch(e) { showToast('Erreur réseau', 'error'); }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const f = document.getElementById('employeeForm');
+  if (f) {
+    f.addEventListener('submit', e => { e.preventDefault(); createEmployee(f); });
+  }
+});
