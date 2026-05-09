@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Ouvrir Railway",
+      "type": "shell",
+      "command": "open https://web-production-aed1b.up.railway.app/",
+      "windows": {
+        "command": "start https://web-production-aed1b.up.railway.app/"
+      },
+      "linux": {
+        "command": "xdg-open https://web-production-aed1b.up.railway.app/"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
