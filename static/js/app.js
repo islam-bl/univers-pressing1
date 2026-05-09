@@ -431,6 +431,20 @@ function showReceiptModal(order, waMsg) {
   const phone = order.customer_phone?.replace(/\D/g,'') || '';
   const waLink = `https://wa.me/${phone.startsWith('0') ? '212' + phone.slice(1) : phone}?text=${encodeURIComponent(waMsg || '')}`;
 
+  // Calcul du total : somme de tous les articles de la commande (et pas seulement le premier).
+  const items = Array.isArray(order.items) ? order.items : [];
+  const totalAmount = items.length > 0
+    ? items.reduce((sum, it) => sum + (parseFloat(it.final_price) || 0), 0)
+    : (parseFloat(order.final_price) || 0);
+
+  // Lignes détaillées par article (affichées seulement s'il y a 2 articles ou plus).
+  const itemsRows = items.length > 1 ? items.map((it, i) => {
+    const a = CATALOG[it.article_type] || {};
+    const aL = it.article_fr || a[lang === 'fr' ? 'fr' : 'ar'] || it.article_type;
+    const sL = it.service_fr || SERVICES[it.service_type]?.[lang === 'fr' ? 'fr' : 'ar'] || it.service_type;
+    return `<div class="receipt-row"><span class="receipt-label">${i + 1}. ${aL} — ${sL}</span><span class="receipt-val">${(parseFloat(it.final_price) || 0).toFixed(2)} MAD</span></div>`;
+  }).join('') : '';
+
   const html = `
     <div>
       <!-- Zone imprimable UNIQUEMENT -->
@@ -447,9 +461,10 @@ function showReceiptModal(order, waMsg) {
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Téléphone':'رقم الهاتف'}</span><span class="receipt-val">${order.customer_phone}</span></div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Article':'القطعة'}</span><span class="receipt-val">${artL}</span></div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Type de service':'نوع الخدمة'}</span><span class="receipt-val">${svcL}</span></div>
+        ${itemsRows}
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Date de dépôt':'تاريخ الاستلام'}</span><span class="receipt-val">${order.deposit_date}</span></div>
         <div class="receipt-row"><span class="receipt-label">${lang==='fr'?'Date de retrait':'تاريخ التسليم'}</span><span class="receipt-val">${order.expected_pickup_date}</span></div>
-        <div class="receipt-total"><div style="font-size:.8rem;opacity:.7">${lang==='fr'?'MONTANT TOTAL':'المبلغ الإجمالي'}</div><div class="receipt-total-amt">${parseFloat(order.final_price||0).toFixed(2)} MAD</div></div>
+        <div class="receipt-total"><div style="font-size:.8rem;opacity:.7">${lang==='fr'?'MONTANT TOTAL':'المبلغ الإجمالي'}</div><div class="receipt-total-amt">${totalAmount.toFixed(2)} MAD</div></div>
       </div>
 
       <!-- Zone WhatsApp — exclue de l'impression -->
