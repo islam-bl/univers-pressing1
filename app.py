@@ -47,4 +47,9 @@ if __name__ == '__main__':
     print("  Univers Pressing — Systeme de Gestion v2")
     print(f"  Ouvrir: http://0.0.0.0:{port}")
     print("="*55 + "\n")
-    app.run(host='0.0.0.0', port=port)
+import webbrowser
+import threading
+
+if __name__ == '__main__':
+    threading.Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
+    app.run(host='0.0.0.0', port=5000)
