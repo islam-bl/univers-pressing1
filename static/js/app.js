@@ -1001,15 +1001,31 @@ async function lookupPickup() {
   const art = CATALOG[d.article_type]||{};
   const artL = d.article_fr||art[lang==='fr'?'fr':'ar']||d.article_type;
   const svcL = d.service_fr||SERVICES[d.service_type]?.[lang==='fr'?'fr':'ar']||'';
+  const items = Array.isArray(d.items) && d.items.length ? d.items : null;
+  const totalAmount = items
+    ? items.reduce((s, it) => s + (parseFloat(it.final_price) || 0), 0)
+    : parseFloat(d.final_price || 0);
+  const itemsBreakdown = items && items.length > 1 ? `
+        <div class="detail-item" style="grid-column:1/-1">
+          <div class="detail-item-label">${lang==='fr'?'Détail des articles':'تفاصيل القطع'}</div>
+          <div class="detail-item-value" style="font-size:.95rem;font-weight:500">
+            ${items.map(it => {
+              const a = CATALOG[it.article_type]||{};
+              const lbl = it.article_fr || a[lang==='fr'?'fr':'ar'] || it.article_type;
+              return `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--border)"><span>${lbl}</span><span style="font-weight:700">${parseFloat(it.final_price||0).toFixed(2)} MAD</span></div>`;
+            }).join('')}
+          </div>
+        </div>` : '';
   document.getElementById('pickupResult').innerHTML = `
     <div class="form-card" style="max-width:580px;border-top:4px solid var(--success)">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;font-size:1.1rem;font-weight:700;color:var(--success)">✅ ${lang==='fr'?'Commande prête !':'الطلب جاهز !'}</div>
       <div class="detail-grid">
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Client':'الزبون'}</div><div class="detail-item-value">${d.customer_name}</div></div>
         <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Commande':'الطلب'}</div><div class="detail-item-value">${d.order_number}</div></div>
-        <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Article':'القطعة'}</div><div class="detail-item-value">${artL}</div></div>
-        <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Prix':'السعر'}</div><div class="detail-item-value" style="font-size:1.2rem;font-weight:800;color:var(--navy)">${parseFloat(d.final_price||0).toFixed(2)} MAD</div></div>
+        <div class="detail-item"><div class="detail-item-label">${lang==='fr'?(items&&items.length>1?'Articles':'Article'):'القطعة'}</div><div class="detail-item-value">${items&&items.length>1?`${items.length} ${lang==='fr'?'articles':'قطع'}`:artL}</div></div>
+        <div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Montant total':'المبلغ الإجمالي'}</div><div class="detail-item-value" style="font-size:1.2rem;font-weight:800;color:var(--navy)">${totalAmount.toFixed(2)} MAD</div></div>
         ${d.authorized_person_name?`<div class="detail-item"><div class="detail-item-label">${lang==='fr'?'Pers. autorisée':'المفوّض'}</div><div class="detail-item-value">${d.authorized_person_name} (${d.authorized_person_relation||''})</div></div>`:''}
+        ${itemsBreakdown}
       </div>
       ${d.article_photo?`<img src="/static/uploads/${d.article_photo}" style="max-width:100%;border-radius:var(--radius);margin:12px 0" alt="photo"/>`:''}
       <button class="btn btn-success btn-lg btn-full" style="margin-top:12px" onclick="confirmPickup('${code}')">
