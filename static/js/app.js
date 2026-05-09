@@ -627,7 +627,13 @@ async function loadDashboard() {
     document.getElementById('stat-ready').textContent     = rdy.length;
     document.getElementById('stat-completed').textContent = comp.length;
     const now = new Date(), ms = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const rev = comp.filter(o=>o.actual_pickup_date?.startsWith(ms)).reduce((s,o)=>s+parseFloat(o.final_price||0),0);
+    // CA mensuel : somme du total réel de chaque commande (tous les articles), pas seulement l'article principal.
+    const orderTotal = (o) => {
+      const its = Array.isArray(o.items) && o.items.length ? o.items : null;
+      if (its) return its.reduce((s, it) => s + (parseFloat(it.final_price) || 0), 0);
+      return parseFloat(o.total_price || 0) || parseFloat(o.final_price || 0) || 0;
+    };
+    const rev = comp.filter(o=>o.actual_pickup_date?.startsWith(ms)).reduce((s,o)=>s+orderTotal(o),0);
     document.getElementById('stat-revenue').textContent = rev.toFixed(0);
     const recent = [...rec,...rdy].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,8);
     const el = document.getElementById('recentList');
